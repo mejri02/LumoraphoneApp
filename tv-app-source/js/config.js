@@ -43,7 +43,7 @@ window.CONFIG = {
     EPG_MAX_BYTES: 15000000,
     EPG_TTL_MS: 21600000,
     PIN_LEN: 4,
-    VERSION: '3.8.0'
+    VERSION: '3.9.0'
 };
 
 window.Validate = (function () {

@@ -833,6 +833,8 @@
 
     function settingDefs() {
         return [
+            { h: 'Phone' },
+            { a: 'pair', n: 'Pair with code' },
             { h: 'Appearance' },
             { k: 'lang', n: 'Language', t: 'cycle', raw: true, o: [['en', 'English'], ['ar', 'العربية']] },
             { k: 'theme', n: 'Accent color', t: 'cycle', o: [['violet', 'Violet'], ['ocean', 'Ocean'], ['emerald', 'Emerald'], ['sunset', 'Sunset'], ['rose', 'Rose']] },
@@ -909,6 +911,8 @@
             var val = '';
             if (d.i) {
                 val = '<span class="s-val">' + esc(d.v) + '</span>';
+            } else if (d.a === 'pair') {
+                val = '<span class="s-val">' + (link.phoneAt ? '<span style="color:#4ade80">● </span>' : '') + esc(link.id) + '</span>';
             } else if (d.a === 'tmdb') {
                 val = '<span class="s-val">' + esc(t(Tmdb.enabled() ? 'Set' : 'Not set')) + '</span>';
             } else if (d.a) {
@@ -1023,6 +1027,9 @@
                 break;
             case 'tmdb':
                 showBackup('tmdb');
+                break;
+            case 'pair':
+                openLink();
                 break;
             case 'cache':
                 state.sources.forEach(function (s) { clearCache(s.id); forgetAll(s.id); });
@@ -2218,7 +2225,7 @@
     }
 
 
-    var INSTANT = { setpin: 1, export: 1, import: 1, tmdb: 1 };
+    var INSTANT = { setpin: 1, export: 1, import: 1, tmdb: 1, pair: 1 };
 
     function hashPin(p) {
         var h = 5381;
@@ -3601,11 +3608,13 @@
                 linkSend('hello_ack');
                 if (link.open) renderLink();
                 else if (fresh) toast(t('Phone connected'));
+                if (!link.open && state.screen === 'settings') renderSettings();
                 break;
             case 'bye':
                 link.phoneAt = 0;
                 if (link.open) renderLink();
                 toast(t('Phone disconnected'));
+                if (!link.open && state.screen === 'settings') renderSettings();
                 break;
             case 'cast': link.phoneAt = Date.now(); castPlay(m); break;
             case 'key': link.phoneAt = Date.now(); linkKey(m.key); break;
@@ -3711,6 +3720,9 @@
 
     function renderLink() {
         $('link-id').textContent = link.id;
+        if (link.qrFor !== link.id) {
+            try { QR.draw($('link-qr'), 'lumora://pair?t=lumora-' + link.id.replace(/-/g, '')); link.qrFor = link.id; } catch (e) { }
+        }
         var ok = !!link.phoneAt;
         var st = $('link-state');
         st.textContent = ok ? t('Phone connected ✓') + (link.phoneName ? '  ·  ' + link.phoneName : '') : t('Waiting for phone…');
@@ -3728,6 +3740,7 @@
     function closeLink() {
         $('link').classList.add('hidden');
         link.open = false;
+        if (state.screen === 'settings') renderSettings();
     }
 
     function linkReset() {
@@ -3736,6 +3749,7 @@
         linkInit();
         renderLink();
         toast(t('New code created'));
+        if (state.screen === 'settings') renderSettings();
     }
 
     init();

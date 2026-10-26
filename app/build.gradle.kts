@@ -13,8 +13,8 @@ android {
         applicationId = "com.lumora.player"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
     }
 
     val ks = System.getenv("KEYSTORE_FILE")
@@ -62,5 +62,6 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }

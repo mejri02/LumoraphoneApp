@@ -27,3 +27,11 @@ ANDROID APP (Kotlin, built by GitHub Actions) v1.1.0
 - Settings screen (gear icon): sources management, sort categories, resume toggle, adult PIN, clear data, about.
 - Adult categories locked behind a 4-digit PIN (asked when opening such a category).
 - Player: playback speed button (1x, 1.25x, 1.5x, 2x, 0.5x), progress saved every 5 seconds, resume on reopen.
+
+ANDROID v1.2.0
+- Back button goes back (closes settings, sheets, dialogs, returns to Home) instead of closing the app.
+- Category search in Catalog.
+- Download movies and episodes for offline viewing; manage them in Settings > Downloads.
+- Settings: accent color choice, downloads list.
+- Source Login button only saves after a successful check; errors are shown (wrong password, not an Xtream server, account expired, etc.).
+- New color palette.

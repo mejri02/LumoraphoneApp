@@ -205,9 +205,14 @@
     <div id="link" class="hidden">
         <div class="mbox">
             <div id="link-title" data-i18n="Link a phone">Link a phone</div>
-            <div id="link-id"></div>
-            <div id="link-state"></div>
-            <div id="link-hint" data-i18n="Open Lumora on your phone, tap the cast icon, choose Link with TV code and enter this code.">Open Lumora on your phone, tap the cast icon, choose Link with TV code and enter this code.</div>
+            <div id="link-row">
+                <canvas id="link-qr" width="320" height="320"></canvas>
+                <div id="link-col">
+                    <div id="link-id"></div>
+                    <div id="link-state"></div>
+                </div>
+            </div>
+            <div id="link-hint" data-i18n="Open Lumora on your phone, tap the cast icon, choose Pair with QR code and scan this code, or enter the code manually.">Open Lumora on your phone, tap the cast icon, choose Pair with QR code and scan this code, or enter the code manually.</div>
             <div id="link-keys"><span class="kc r"></span><span id="link-k1" data-i18n="New code">New code</span><span class="kc"></span><span id="link-k2" data-i18n="Close">Close</span></div>
         </div>
     </div>

@@ -15,3 +15,9 @@ LUMORA PLAYER (native Android) - build in the cloud, no Android Studio needed
 If the build fails, open the failed run, copy the red error lines and send them to me.
 
 Pairing: TV home > "Link phone" shows the TV ID. Phone: cast icon > type the code > Link.
+
+ANDROID v1.3.0 / TV v3.9.0
+- TV: Settings > Phone > "Pair with code" opens the link screen (code + QR).
+- Android: cast icon > switch "Play on TV when it is connected" (off = everything plays on the phone; the player still has a manual Cast button).
+- Android: "Pair with QR code" scans the QR shown on the TV (camera permission requested on first use).
+- Android: the remote is now a separate button (remote icon in the top bar, visible when a TV is linked).

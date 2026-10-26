@@ -325,7 +325,10 @@ input:focus, textarea:focus { outline:3px solid var(--a2); outline-offset:2px; }
 #link { position:absolute; top:0; right:0; bottom:0; left:0; z-index:71; background:rgba(3,4,10,.92); display:flex; align-items:center; justify-content:center; text-align:center; }
 #link .mbox { width:1100px; }
 #link-title { font-size:38px; font-weight:800; margin-bottom:30px; }
-#link-id { font-size:92px; font-weight:800; letter-spacing:8px; direction:ltr; font-variant-numeric:tabular-nums; color:#fff; padding:26px 40px; border-radius:28px; background:var(--panel); border:2px solid var(--line); display:inline-block; }
+#link-row { display:flex; align-items:center; justify-content:center; gap:44px; direction:ltr; }
+#link-qr { width:320px; height:320px; border-radius:20px; background:#fff; flex:none; }
+#link-col { text-align:center; }
+#link-id { font-size:54px; font-weight:800; letter-spacing:3px; direction:ltr; font-variant-numeric:tabular-nums; color:#fff; padding:26px 40px; border-radius:28px; background:var(--panel); border:2px solid var(--line); display:inline-block; }
 #link-state { font-size:28px; margin-top:28px; color:var(--mute); }
 #link-state.on { color:#4ade80; }
 #link-hint { font-size:25px; line-height:1.5; margin:22px auto 0; width:880px; opacity:.85; }

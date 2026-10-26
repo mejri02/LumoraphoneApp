@@ -88,6 +88,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.journeyapps.barcodescanner.ScanOptions
+import com.journeyapps.barcodescanner.ScanContract
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.SettingsRemote
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.activity.compose.rememberLauncherForActivityResult
 import coil.compose.AsyncImage
 
 class MainActivity : ComponentActivity() {
@@ -124,10 +131,12 @@ class MainActivity : ComponentActivity() {
 fun Root(vm: AppVM) {
     var tab by remember { mutableStateOf(0) }
     var castSheet by remember { mutableStateOf(false) }
+    var remoteSheet by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<Source?>(null) }
-    BackHandler(enabled = vm.playing == null && (vm.showSettings || vm.seriesOpen != null || castSheet || form != null || tab != 0)) {
+    BackHandler(enabled = vm.playing == null && (vm.showSettings || vm.seriesOpen != null || castSheet || remoteSheet || form != null || tab != 0)) {
         when {
             form != null -> { form = null }
+            remoteSheet -> { remoteSheet = false }
             castSheet -> { castSheet = false }
             vm.seriesOpen != null -> { vm.seriesOpen = null }
             vm.showSettings -> { vm.showSettings = false }
@@ -158,7 +167,17 @@ fun Root(vm: AppVM) {
                         if (tv == null) "" else if (tv.online) "● " + tv.name else "○ " + tv.name,
                         color = if (tv?.online == true) Color(0xFF4ADE80) else Color(0xFFFBBF24), fontSize = 13.sp
                     )
-                    IconButton(onClick = { castSheet = true }) { Icon(Icons.Default.Cast, "Cast") }
+                    if (TvLink.paired()) IconButton(onClick = { remoteSheet = true }) { Icon(Icons.Default.SettingsRemote, "Remote") }
+                    IconButton(onClick = { castSheet = true }) {
+                        Icon(
+                            Icons.Default.Cast, "Cast",
+                            tint = when {
+                                !vm.castOn -> Color.Gray
+                                TvLink.paired() -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    }
                     IconButton(onClick = { vm.showSettings = true }) { Icon(Icons.Default.Settings, "Settings") }
                 }
             },
@@ -184,6 +203,7 @@ fun Root(vm: AppVM) {
         if (vm.showSettings) SettingsScreen(vm, onEdit = { form = it })
         if (form != null) SourceForm(vm, form!!) { form = null }
         if (castSheet) CastSheet(vm) { castSheet = false }
+        if (remoteSheet) RemoteSheet { remoteSheet = false }
         vm.seriesOpen?.let { SeriesDialog(vm, it) }
         vm.playing?.let { PlayerScreen(vm, it) }
     }
@@ -339,6 +359,7 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             }
             item { SettingHeader("Playback") }
             item { SwitchRow("Resume where I stopped", vm.resumeOn) { v -> vm.setResume(v) } }
+            item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.setCastOn(v) } }
             item { SettingHeader("Appearance") }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -365,7 +386,7 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             item { ActionRow("Clear continue watching", "Removes saved progress") { vm.clearProgress() } }
             item { ActionRow("Clear favorites", "Removes all favorites") { vm.clearFavs() } }
             item { SettingHeader("About") }
-            item { Text("Lumora 1.2.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
+            item { Text("Lumora 1.3.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
         }
     }
     if (pinDialog) PinDialog(vm) { pinDialog = false }
@@ -612,7 +633,7 @@ fun SeriesDialog(vm: AppVM, serie: Item) {
                         if (s != null) {
                             val url = Xtream.resolve(s, e)
                             val req = PlayReq(url, serie.name + " · " + e.name, "ep", e, s)
-                            if (TvLink.connected()) vm.cast(req, 0, false) else vm.playing = req
+                            if (vm.castOn && TvLink.connected()) vm.cast(req, 0, false) else vm.playing = req
                         }
                     }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("S${e.season}E${e.num}", Modifier.width(64.dp), color = Color.Gray, fontSize = 12.sp)
@@ -632,12 +653,23 @@ fun CastSheet(vm: AppVM, close: () -> Unit) {
     var code by remember { mutableStateOf("") }
     var nm by remember { mutableStateOf("") }
     val tvs = TvLink.list()
-    val act = TvLink.activeTv()
+    val scan = rememberLauncherForActivityResult(ScanContract()) { r ->
+        val txt = r.contents
+        if (txt != null) {
+            val id = TvLink.add(txt, nm)
+            vm.toast(if (id.isEmpty()) "Not a Lumora TV code" else "TV linked")
+        }
+    }
     AlertDialog(
         onDismissRequest = close,
-        title = { Text("Lumora TV devices") },
+        title = { Text("Lumora TV") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.setCastOn(v) }
+                Text(
+                    if (vm.castOn) "Movies and channels you open are sent to the TV." else "Cast is off. Everything plays on this phone. You can still cast from the player.",
+                    fontSize = 12.sp, color = Color.Gray
+                )
                 tvs.forEach { t ->
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (t.active) Color(0xFF2A1520) else Color(0xFF1C1C22))
@@ -651,13 +683,46 @@ fun CastSheet(vm: AppVM, close: () -> Unit) {
                         IconButton(onClick = { TvLink.remove(t.id) }) { Icon(Icons.Default.Delete, "Remove") }
                     }
                 }
+                Button(onClick = {
+                    scan.launch(
+                        ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                            .setPrompt("Scan the QR code shown on your TV")
+                            .setBeepEnabled(false).setOrientationLocked(false)
+                    )
+                }, Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.QrCodeScanner, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Pair with QR code")
+                }
+                Text("or enter the code manually", fontSize = 12.sp, color = Color.Gray)
                 OutlinedTextField(code, { code = it }, label = { Text("TV code") }, singleLine = true, placeholder = { Text("a3cc-db44-0851-2719") })
                 OutlinedTextField(nm, { nm = it }, label = { Text("TV name (optional)") }, singleLine = true)
-                Button(onClick = {
+                OutlinedButton(onClick = {
                     val id = TvLink.add(code, nm)
                     if (id.isEmpty()) vm.toast("Invalid TV code") else { code = ""; nm = ""; vm.toast("TV linked") }
                 }, Modifier.fillMaxWidth()) { Text("Link with TV code") }
-                if (act != null && act.online) Remote(act)
+            }
+        },
+        confirmButton = { TextButton(onClick = close) { Text("Close") } }
+    )
+}
+
+@Composable
+fun RemoteSheet(close: () -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val ver = TvLink.version.intValue
+    val tv = TvLink.activeTv()
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text(if (tv == null) "Remote" else "Remote · " + tv.name) },
+        text = {
+            if (tv == null) Text("Link a TV first.", color = Color.Gray)
+            else Column {
+                Text(
+                    if (tv.online) "Online" else "TV is offline",
+                    fontSize = 12.sp, color = if (tv.online) Color(0xFF4ADE80) else Color(0xFFFBBF24)
+                )
+                Spacer(Modifier.height(8.dp))
+                Remote(tv)
             }
         },
         confirmButton = { TextButton(onClick = close) { Text("Close") } }
@@ -674,7 +739,10 @@ fun Remote(tv: TvLink.TvView) {
         Row { RB("▲") { key("up") } }
         Row { RB("◀") { key("left") }; RB("OK") { key("ok") }; RB("▶") { key("right") } }
         Row { RB("▼") { key("down") } }
-        Row { RB("Back") { key("back") }; RB("⏯") { TvLink.send("toggle") }; RB("⏹") { TvLink.send("stop") }; RB("CH+") { key("chup") }; RB("CH-") { key("chdown") } }
+        Row { RB("Back") { key("back") }; RB("Info") { key("info") }; RB("⏯") { TvLink.send("toggle") }; RB("⏹") { TvLink.send("stop") } }
+        Row { RB("⏪") { key("rw") }; RB("⏩") { key("ff") }; RB("CH+") { key("chup") }; RB("CH-") { key("chdown") } }
+        Row { RB("1") { key("1") }; RB("2") { key("2") }; RB("3") { key("3") }; RB("4") { key("4") }; RB("5") { key("5") } }
+        Row { RB("6") { key("6") }; RB("7") { key("7") }; RB("8") { key("8") }; RB("9") { key("9") }; RB("0") { key("0") } }
     }
 }
 

@@ -44,6 +44,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var pin by mutableStateOf(Store.getString("pin", ""))
     var unlocked by mutableStateOf(false)
     var accentIdx by mutableStateOf(Store.getString("accent", "0").toIntOrNull() ?: 0)
+    var castOn by mutableStateOf(Store.getBool("castOn", true))
 
     init {
         sources.addAll(Store.sources())
@@ -140,9 +141,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
         bumpView(it)
         val url = Xtream.resolve(s, it)
-        if (TvLink.connected()) cast(PlayReq(url, it.name, it.kind, it, s), 0, true)
+        if (castOn && TvLink.connected()) cast(PlayReq(url, it.name, it.kind, it, s), 0, true)
         else {
-            if (TvLink.paired()) message = "TV is offline, playing on this phone"
+            if (castOn && TvLink.paired()) message = "TV is offline, playing on this phone"
             playing = PlayReq(url, it.name, it.kind, it, s)
         }
     }
@@ -230,6 +231,10 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun changeSort(v: String) { sort = v; Store.putString("sort", v) }
     fun changePin(v: String) { pin = v; unlocked = false; Store.putString("pin", v) }
     fun setResume(v: Boolean) { resumeOn = v; Store.putBool("resume", v) }
+    fun setCastOn(v: Boolean) {
+        castOn = v; Store.putBool("castOn", v)
+        message = if (v) "Playing on TV when it is connected" else "Cast off: playing on this phone"
+    }
     fun clearFavs() { favs.clear(); Store.saveFavs(favs) }
 
     fun cast(p: PlayReq, startSec: Long, closePlayer: Boolean) {
