@@ -140,7 +140,7 @@ object Store {
         sp.edit().putBoolean(k, v).apply()
     }
 
-    fun getString(k: String, d: String = \"\"): String = sp.getString(k, d) ?: d
+    fun getString(k: String, d: String = ""): String = sp.getString(k, d) ?: d
     fun putString(k: String, v: String) {
         sp.edit().putString(k, v).apply()
     }
