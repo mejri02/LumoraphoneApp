@@ -166,9 +166,9 @@ class AppVM : ViewModel() {
     fun mostViewed(): List<Viewed> = viewed.sortedByDescending { v -> v.count }.take(12)
 
     // ---------- settings ----------
-    fun setSort(v: String) { sort = v; Store.putString("sort", v) }
+    fun changeSort(v: String) { sort = v; Store.putString("sort", v) }
     fun setResume(v: Boolean) { resumeOn = v; Store.putBool("resume", v) }
-    fun setPin(v: String) { pin = v; unlocked = false; Store.putString("pin", v) }
+    fun changePin(v: String) { pin = v; unlocked = false; Store.putString("pin", v) }
     fun clearFavs() { favs.clear(); Store.saveFavs(favs) }
 
     fun cast(p: PlayReq, startSec: Long, closePlayer: Boolean) {

@@ -322,9 +322,9 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Sort categories", Modifier.weight(1f))
-                    FilterChip(vm.sort == "count", { vm.setSort("count") }, { Text("Most items") })
+                    FilterChip(vm.sort == "count", { vm.changeSort("count") }, { Text("Most items") })
                     Spacer(Modifier.width(6.dp))
-                    FilterChip(vm.sort == "az", { vm.setSort("az") }, { Text("A-Z") })
+                    FilterChip(vm.sort == "az", { vm.changeSort("az") }, { Text("A-Z") })
                 }
             }
             item { SettingHeader("Playback") }
@@ -365,7 +365,7 @@ fun PinDialog(vm: AppVM, close: () -> Unit) {
         confirmButton = {
             Button(onClick = {
                 if (p.isEmpty() || p.length == 4) {
-                    vm.setPin(p)
+                    vm.changePin(p)
                     vm.toast(if (p.isEmpty()) "PIN removed" else "PIN saved")
                     close()
                 }
