@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.lumora.player"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.lumora.player"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 4
         versionName = "1.3.0"
     }
@@ -33,7 +33,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.findByName("lumora") ?: signingConfigs.getByName("debug")
+            signingConfigs.findByName("lumora")?.let { signingConfig = it }
         }
     }
 
