@@ -82,14 +82,24 @@ fun PlayerScreen(vm: AppVM, req: PlayReq) {
         val l = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_READY) { errorMsg = ""; retries = 0 }
+                if (state == Player.STATE_READY) {
+                    errorMsg = ""
+                    retries = 0
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 if (retries < 6) {
                     retries++
-                    handler.postDelayed({ try { exo.prepare(); exo.play() } catch (_: Exception) { } }, (700L * retries).coerceAtMost(5000))
-                } else errorMsg = "Could not load this content."
+                    handler.postDelayed({
+                        try {
+                            exo.prepare()
+                            exo.play()
+                        } catch (_: Exception) { }
+                    }, (700L * retries).coerceAtMost(5000))
+                } else {
+                    errorMsg = "Could not load this content."
+                }
             }
         }
         exo.addListener(l)
@@ -107,16 +117,19 @@ fun PlayerScreen(vm: AppVM, req: PlayReq) {
         if (land) {
             c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             c.hide(WindowInsetsCompat.Type.systemBars())
-        } else c.show(WindowInsetsCompat.Type.systemBars())
+        } else {
+            c.show(WindowInsetsCompat.Type.systemBars())
+        }
         onDispose { }
     }
 
     DisposableEffect(Unit) {
         onDispose {
-            act.requestedOrientation = ActivityInfo.REQUESTED_ORIENTATION_UNSPECIFIED
+            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             val w = act.window
             WindowCompat.setDecorFitsSystemWindows(w, true)
-            WindowCompat.getInsetsController(w, w.decorView).show(WindowInsetsCompat.Type.systemBars())
+            WindowCompat.getInsetsController(w, w.decorView)
+                .show(WindowInsetsCompat.Type.systemBars())
         }
     }
 
@@ -133,43 +146,100 @@ fun PlayerScreen(vm: AppVM, req: PlayReq) {
                     useController = true
                     keepScreenOn = true
                     resizeMode = resize
-                    setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> overlay = v == View.VISIBLE })
+                    setControllerVisibilityListener(
+                        PlayerView.ControllerVisibilityListener { v ->
+                            overlay = v == View.VISIBLE
+                        }
+                    )
                 }
             },
             update = { it.resizeMode = resize }
         )
-        if (buffering && errorMsg.isEmpty()) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
-        if (errorMsg.isNotEmpty()) Text(errorMsg, Modifier.align(Alignment.Center).background(Color(0xCC000000)).padding(16.dp), color = Color.White)
+
+        if (buffering && errorMsg.isEmpty()) {
+            CircularProgressIndicator(
+                Modifier.align(Alignment.Center),
+                color = Color.White
+            )
+        }
+
+        if (errorMsg.isNotEmpty()) {
+            Text(
+                errorMsg,
+                Modifier.align(Alignment.Center)
+                    .background(Color(0xCC000000))
+                    .padding(16.dp),
+                color = Color.White
+            )
+        }
+
         if (overlay) Row(
-            Modifier.fillMaxWidth().align(Alignment.TopCenter).background(Color(0x66000000)).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .background(Color(0x66000000))
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { vm.playing = null }) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
-            Text(req.title, Modifier.weight(1f), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            IconButton(onClick = { vm.playing = null }) {
+                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+            }
+
+            Text(
+                req.title,
+                Modifier.weight(1f),
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
             req.item?.let { fav ->
                 IconButton(onClick = { vm.toggleFav(fav) }) {
-                    Icon(if (vm.isFav(fav)) Icons.Default.Star else Icons.Default.StarBorder, "Favorite", tint = if (vm.isFav(fav)) Color(0xFFFBBF24) else Color.White)
+                    Icon(
+                        if (vm.isFav(fav)) Icons.Default.Star else Icons.Default.StarBorder,
+                        "Favorite",
+                        tint = if (vm.isFav(fav)) Color(0xFFFBBF24) else Color.White
+                    )
                 }
             }
+
             IconButton(onClick = {
                 resize = when (resize) {
-                    AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                    AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                    AspectRatioFrameLayout.RESIZE_MODE_FIT ->
+                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    AspectRatioFrameLayout.RESIZE_MODE_ZOOM ->
+                        AspectRatioFrameLayout.RESIZE_MODE_FILL
                     else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
-            }) { Icon(Icons.Default.AspectRatio, "Aspect", tint = Color.White) }
+            }) {
+                Icon(Icons.Default.AspectRatio, "Aspect", tint = Color.White)
+            }
+
             IconButton(onClick = {
-                act.requestedOrientation = if (land) ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            }) { Icon(Icons.Default.ScreenRotation, "Rotate", tint = Color.White) }
+                act.requestedOrientation =
+                    if (land) ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                    else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }) {
+                Icon(Icons.Default.ScreenRotation, "Rotate", tint = Color.White)
+            }
+
             IconButton(onClick = {
                 if (Build.VERSION.SDK_INT >= 26) try {
-                    act.enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build())
+                    act.enterPictureInPictureMode(
+                        PictureInPictureParams.Builder()
+                            .setAspectRatio(Rational(16, 9))
+                            .build()
+                    )
                 } catch (_: Exception) { }
-            }) { Icon(Icons.Default.PictureInPictureAlt, "PiP", tint = Color.White) }
+            }) {
+                Icon(Icons.Default.PictureInPictureAlt, "PiP", tint = Color.White)
+            }
+
             IconButton(onClick = {
                 val pos = if (live) 0L else exo.currentPosition / 1000
                 vm.cast(req, pos, true)
-            }) { Icon(Icons.Default.Cast, "Cast", tint = Color.White) }
+            }) {
+                Icon(Icons.Default.Cast, "Cast", tint = Color.White)
+            }
         }
     }
 }
