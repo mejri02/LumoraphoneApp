@@ -7,36 +7,22 @@
 package com.lumora.player
 
 import android.app.PictureInPictureParams
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -44,64 +30,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Cast
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SettingsRemote
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.VideoLibrary
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.launch
@@ -111,14 +54,24 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
+        if (Build.VERSION.SDK_INT >= 28) {
+            val lp = window.attributes
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            window.attributes = lp
+        }
         Store.init(applicationContext)
+        CatalogCache.init(applicationContext)
         TvLink.init()
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
                     primary = Color(vm.accentInt()), onPrimary = Color.White, secondary = Color(vm.accentInt()),
-                    background = Color(0xFF090B11), surface = Color(0xFF131722),
-                    onSurface = Color(0xFFEDEFF5), onBackground = Color(0xFFEDEFF5), surfaceVariant = Color(0xFF1B2030)
+                    background = Color(0xFF09090E), surface = Color(0xFF13131A),
+                    onSurface = Color(0xFFEDEFF5), onBackground = Color(0xFFEDEFF5), surfaceVariant = Color(0xFF1D1D27)
                 )
             ) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Root(vm) }
@@ -140,304 +93,224 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        vm.pip = isInPictureInPictureMode
+    }
+}
+
+@Composable
+fun TopBar(vm: AppVM, onRemote: () -> Unit, onCast: () -> Unit) {
+    val primary = MaterialTheme.colorScheme.primary
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).statusBarsPadding()
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(Brush.linearGradient(listOf(primary, accent2()))),
+            contentAlignment = Alignment.Center
+        ) { Text("L", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 19.sp) }
+        Spacer(Modifier.width(10.dp))
+        Text("Lumora", fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.weight(1f))
+        val tv = TvLink.activeTv()
+        if (tv != null) IconButton(onClick = onRemote, modifier = Modifier.size(42.dp)) { Icon(Icons.Default.SettingsRemote, "Remote") }
+        IconButton(onClick = onCast, modifier = Modifier.size(42.dp)) {
+            Box {
+                Icon(
+                    Icons.Default.Cast, "Cast",
+                    tint = when {
+                        !vm.castOn -> Color.Gray
+                        tv != null -> primary
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+                )
+                if (tv != null) Box(
+                    Modifier.align(Alignment.TopEnd).size(8.dp).clip(CircleShape)
+                        .background(if (tv.online) Color(0xFF4ADE80) else Color(0xFFFBBF24))
+                )
+            }
+        }
+        IconButton(onClick = { vm.showSettings = true }, modifier = Modifier.size(42.dp)) { Icon(Icons.Default.Settings, "Settings") }
+    }
 }
 
 @Composable
 fun Root(vm: AppVM) {
-    var tab by remember { mutableStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     var castSheet by remember { mutableStateOf(false) }
     var remoteSheet by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<Source?>(null) }
-    BackHandler(enabled = vm.playing == null && (vm.showSettings || vm.seriesOpen != null || castSheet || remoteSheet || form != null || tab != 0)) {
-        when {
-            form != null -> form = null
-            remoteSheet -> remoteSheet = false
-            castSheet -> castSheet = false
-            vm.seriesOpen != null -> vm.seriesOpen = null
-            vm.showSettings -> vm.showSettings = false
-            else -> tab = 0
-        }
-    }
+    BackHandler(enabled = tab != 0) { tab = 0 }
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) {
         if (vm.message.isNotEmpty()) {
-            snack.showSnackbar(vm.message)
+            val m = vm.message
             vm.message = ""
+            snack.showSnackbar(m)
         }
     }
     @Suppress("UNUSED_VARIABLE") val ver = TvLink.version.intValue
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
-            snackbarHost = { SnackbarHost(snack) },
-            topBar = {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Lumora", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.weight(1f))
-                    val tv = TvLink.activeTv()
-                    Text(
-                        if (tv == null) "" else if (tv.online) "● " + tv.name else "○ " + tv.name,
-                        color = if (tv?.online == true) Color(0xFF4ADE80) else Color(0xFFFBBF24), fontSize = 13.sp
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = { TopBar(vm, onRemote = { remoteSheet = true }, onCast = { castSheet = true }) },
+            bottomBar = {
+                NavigationBar(containerColor = Color(0xFF0F0F15)) {
+                    val navItems = listOf(
+                        Triple("Home", Icons.Default.Home, 0), Triple("Catalog", Icons.Default.VideoLibrary, 1),
+                        Triple("Favorites", Icons.Default.Star, 2), Triple("Search", Icons.Default.Search, 3)
                     )
-                    if (TvLink.paired()) IconButton(onClick = { remoteSheet = true }) { Icon(Icons.Default.SettingsRemote, "Remote") }
-                    IconButton(onClick = { castSheet = true }) {
-                        Icon(
-                            Icons.Default.Cast, "Cast",
-                            tint = when {
-                                !vm.castOn -> Color.Gray
-                                TvLink.paired() -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.onSurface
-                            }
+                    navItems.forEach { (label, icon, i) ->
+                        NavigationBarItem(
+                            tab == i, { tab = i }, { Icon(icon, null) }, label = { Text(label, fontSize = 11.sp) },
+                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
                         )
                     }
-                    IconButton(onClick = { vm.showSettings = true }) { Icon(Icons.Default.Settings, "Settings") }
-                }
-            },
-            bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Default.Home, null) }, label = { Text("Home") })
-                    NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Default.VideoLibrary, null) }, label = { Text("Catalog") })
-                    NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.Star, null) }, label = { Text("Favorites") })
-                    NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.Default.Search, null) }, label = { Text("Search") })
                 }
             }
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
                 when (tab) {
-                    0 -> HomeTab(vm, onSeeAll = { tab = 1 })
+                    0 -> HomeTab(vm, onSeeAll = { tab = 1 }, onAddSource = { vm.showSettings = true })
                     1 -> CatalogTab(vm)
-                    2 -> Column(Modifier.fillMaxSize()) {
-                        SortPills(vm)
-                        PosterGrid(vm, vm.favs.toList(), Modifier.weight(1f))
-                    }
+                    2 -> FavoritesTab(vm)
                     else -> SearchTab(vm)
                 }
             }
         }
 
+        vm.openGroup?.let { CategoryScreen(vm, it) }
+        vm.detail?.let { DetailScreen(vm, it) }
         if (vm.showSettings) SettingsScreen(vm, onEdit = { form = it })
         if (form != null) SourceForm(vm, form!!) { form = null }
         if (castSheet) CastSheet(vm) { castSheet = false }
         if (remoteSheet) RemoteSheet { remoteSheet = false }
-        vm.seriesOpen?.let { SeriesDialog(vm, it) }
         vm.actionItem?.let { ItemActions(vm, it) }
-        vm.playing?.let { PlayerScreen(vm, it) }
+        SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 76.dp))
     }
 }
 
 @Composable
-fun SectionHeader(title: String, action: String?, onAction: () -> Unit = {}) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 18.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(title, Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        if (action != null) TextButton(onClick = onAction) { Text(action, color = MaterialTheme.colorScheme.primary) }
-    }
-}
-
-/** Poster card: artwork, rating badge, favorite button, progress bar, download badge and title. */
-@Composable
-fun PosterCard(
-    item: Item,
-    modifier: Modifier = Modifier,
-    ratio: Float = 2f / 3f,
-    progress: Float = -1f,
-    fav: Boolean? = null,
-    dl: DlInfo? = null,
-    onFav: () -> Unit = {},
-    onClick: () -> Unit,
-    onLong: () -> Unit = {}
-) {
-    Column(modifier.combinedClickable(onClick = onClick, onLongClick = onLong)) {
-        Box(
-            Modifier.fillMaxWidth().aspectRatio(ratio).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1C1C22))
-        ) {
-            if (item.logo.startsWith("http")) {
-                AsyncImage(
-                    model = item.logo, contentDescription = item.name,
-                    modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
-                )
-            } else {
-                Text(
-                    item.name.take(2).uppercase(), Modifier.align(Alignment.Center),
-                    color = Color.Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold
-                )
-            }
-            if (item.rating > 0.0) {
-                Text(
-                    "★ " + "%.1f".format(item.rating),
-                    Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xB3000000)).padding(horizontal = 6.dp, vertical = 2.dp),
-                    color = Color(0xFFFBBF24), fontSize = 11.sp, fontWeight = FontWeight.SemiBold
-                )
-            }
-            if (fav != null) {
-                Box(
-                    Modifier.align(Alignment.TopEnd).padding(6.dp).size(34.dp).clip(CircleShape)
-                        .background(Color(0xB3000000)).clickable { onFav() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        if (fav) Icons.Default.Star else Icons.Default.StarBorder, "Favorite",
-                        tint = if (fav) Color(0xFFFBBF24) else Color.White, modifier = Modifier.size(20.dp)
-                    )
+fun ItemActions(vm: AppVM, item: Item) {
+    val close = { vm.actionItem = null }
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ActionLine("Open details") { close(); vm.open(item) }
+                if (item.kind != "series") ActionLine("Play now") { close(); vm.open(item, auto = true) }
+                if (item.kind == "vod") ActionLine("Download for offline") { close(); vm.download(item) }
+                ActionLine(if (vm.isFav(item)) "Remove from favorites" else "Add to favorites") {
+                    vm.toggleFav(item)
+                    close()
+                }
+                if (vm.progress.any { p -> p.item.key == item.key }) ActionLine("Remove from continue watching") {
+                    vm.removeProgress(item)
+                    close()
                 }
             }
-            if (progress >= 0f) {
-                Box(
-                    Modifier.align(Alignment.BottomStart).fillMaxWidth(progress.coerceIn(0f, 1f)).height(4.dp)
-                        .background(MaterialTheme.colorScheme.primary)
-                )
-            }
-            if (dl != null) DownloadBadge(dl, Modifier.align(Alignment.BottomEnd).padding(6.dp))
-        }
-        Text(
-            item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, lineHeight = 18.sp,
-            modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp)
-        )
-    }
-}
-
-@Composable
-fun DownloadBadge(dl: DlInfo, modifier: Modifier) {
-    val bg = when {
-        dl.ready -> Color(0xFF10B981)
-        dl.failed -> Color(0xFFEF4444)
-        else -> Color(0xB3000000)
-    }
-    val label = when {
-        dl.ready -> "✓ Offline"
-        dl.failed -> "Failed"
-        else -> "${dl.percent}%"
-    }
-    Text(
-        label,
-        modifier.clip(RoundedCornerShape(6.dp)).background(bg).padding(horizontal = 6.dp, vertical = 2.dp),
-        color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold
+        },
+        confirmButton = { TextButton(onClick = close) { Text("Close") } }
     )
 }
 
 @Composable
-fun SortPills(vm: AppVM) {
-    LazyRow(
-        Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        items(ITEM_SORTS) { (key, label) ->
-            val on = vm.itemSort == key
-            Box(
-                Modifier.clip(RoundedCornerShape(14.dp))
-                    .background(if (on) MaterialTheme.colorScheme.primary else Color(0xFF2A2D36))
-                    .clickable { vm.changeItemSort(key) }
-                    .padding(horizontal = 22.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    label,
-                    color = if (on) Color.White else Color(0xFFD0D3DC),
-                    fontSize = 15.sp,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal
-                )
+fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
+    var pinDialog by remember { mutableStateOf(false) }
+    BackHandler { vm.showSettings = false }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).blockTouches().statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { vm.showSettings = false }) { Icon(Icons.Default.ArrowBack, "Back") }
+            Text("Settings", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item { SettingHeader("Sources") }
+            items(vm.sources.toList()) { s ->
+                val on = s.id == vm.activeSrc
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .background(if (on) Color(0xFF2A1520) else MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { vm.selectSource(s.id) }.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(s.name.ifBlank { s.url }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(s.type.uppercase() + (if (on) " · active" else ""), fontSize = 12.sp, color = Color.Gray)
+                    }
+                    if (TvLink.paired()) IconButton(onClick = { vm.sendSourceToTv(s) }) { Icon(Icons.Default.Cast, "Send to TV") }
+                    IconButton(onClick = { onEdit(s) }) { Icon(Icons.Default.Edit, "Edit") }
+                }
             }
-        }
-    }
-}
-
-@Composable
-fun PosterGrid(vm: AppVM, list: List<Item>, modifier: Modifier = Modifier.fillMaxSize()) {
-    if (list.isEmpty()) {
-        Text("Nothing found", Modifier.padding(24.dp), color = Color.Gray)
-        return
-    }
-    val sorted = remember(list, vm.itemSort) { vm.sortItems(list).take(3000) }
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 150.dp),
-        modifier = modifier,
-        contentPadding = PaddingValues(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        items(sorted, key = { it.key }) { it ->
-            PosterCard(
-                item = it,
-                modifier = Modifier.fillMaxWidth(),
-                ratio = if (it.kind == "live") 1f else 2f / 3f,
-                fav = vm.isFav(it),
-                dl = vm.dlInfo[it.key],
-                onFav = { vm.toggleFav(it) },
-                onClick = { vm.open(it) },
-                onLong = { vm.actionItem = it }
-            )
-        }
-    }
-}
-
-@Composable
-fun HomeTab(vm: AppVM, onSeeAll: () -> Unit) {
-    LaunchedEffect(vm.activeSrc) {
-        vm.load("live")
-        vm.load("vod")
-    }
-    val cw = vm.continueWatching()
-    val channels = vm.mostViewed().map { v -> v.item }.ifEmpty { (vm.catalog["live"] ?: emptyList()).take(12) }
-    val movies = (vm.catalog["vod"] ?: emptyList()).sortedByDescending { m -> m.added }.take(12)
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item {
-            Text("Home", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp))
-        }
-        if (vm.sources.isEmpty()) item { Text("Add a source in Settings to start", Modifier.padding(16.dp), color = Color.Gray) }
-        if (cw.isNotEmpty()) {
-            item { SectionHeader("Continue watching", null) }
             item {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(cw) { p ->
-                        PosterCard(
-                            item = p.item,
-                            modifier = Modifier.width(140.dp),
-                            ratio = 2f / 3f,
-                            progress = if (p.dur > 0) p.pos.toFloat() / p.dur.toFloat() else 0f,
-                            fav = vm.isFav(p.item),
-                            onFav = { vm.toggleFav(p.item) },
-                            onClick = { vm.open(p.item) },
-                            onLong = { vm.actionItem = p.item }
+                Button(
+                    onClick = { onEdit(Source("s" + System.currentTimeMillis().toString(36), "", "xtream", "")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("+ Add source") }
+            }
+            item { SettingHeader("Lists (saved on this phone)") }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Refresh automatically", color = Color(0xFFC9CCD6))
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(listOf(0 to "Manual", 3 to "3 h", 6 to "6 h", 12 to "12 h", 24 to "24 h")) { (h, label) ->
+                            FilterChip(vm.refreshHours == h, { vm.changeRefresh(h) }, { Text(label) })
+                        }
+                    }
+                }
+            }
+            item { ActionRow("Update lists now", "Download channels, movies and series again") { vm.refreshAll() } }
+            item { ActionRow("Clear saved lists", "Frees space. Lists are downloaded again when needed") { vm.clearCache() } }
+            item { SettingHeader("Browsing") }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Sort categories", Modifier.weight(1f))
+                    FilterChip(vm.sort == "count", { vm.changeSort("count") }, { Text("Most items") })
+                    Spacer(Modifier.width(6.dp))
+                    FilterChip(vm.sort == "az", { vm.changeSort("az") }, { Text("A-Z") })
+                }
+            }
+            item { SettingHeader("Playback") }
+            item { SwitchRow("Resume where I stopped", vm.resumeOn) { v -> vm.setResume(v) } }
+            item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.changeCastOn(v) } }
+            item { SettingHeader("Appearance") }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Accent color", Modifier.weight(1f))
+                    vm.accents.forEachIndexed { i, c ->
+                        Box(
+                            Modifier.padding(start = 8.dp).size(if (i == vm.accentIdx) 30.dp else 24.dp)
+                                .clip(CircleShape).background(Color(c)).clickable { vm.changeAccent(i) }
                         )
                     }
                 }
             }
-        }
-        if (channels.isNotEmpty()) {
-            item { SectionHeader("Most viewed", "See all", onSeeAll) }
+            item { SettingHeader("Downloads (offline)") }
+            if (vm.downloads.isEmpty()) item { Text("No downloads yet. Open a movie or episode and tap Download.", color = Color.Gray, fontSize = 13.sp) }
+            items(vm.downloads.toList()) { d -> DownloadRow(vm, d) }
+            item { SettingHeader("Parental control") }
             item {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(channels) { ch ->
-                        PosterCard(
-                            item = ch, modifier = Modifier.width(120.dp), ratio = 1f,
-                            fav = vm.isFav(ch), onFav = { vm.toggleFav(ch) },
-                            onClick = { vm.open(ch) }, onLong = { vm.actionItem = ch }
-                        )
-                    }
-                }
+                ActionRow(
+                    if (vm.pin.isEmpty()) "Set adult PIN" else "Change or remove adult PIN",
+                    "Adult categories ask for a 4-digit PIN"
+                ) { pinDialog = true }
             }
-        }
-        if (movies.isNotEmpty()) {
-            item { SectionHeader("New releases (Movies)", "See all", onSeeAll) }
-            item {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(movies) { m ->
-                        PosterCard(
-                            item = m, modifier = Modifier.width(120.dp), ratio = 2f / 3f,
-                            fav = vm.isFav(m), dl = vm.dlInfo[m.key], onFav = { vm.toggleFav(m) },
-                            onClick = { vm.open(m) }, onLong = { vm.actionItem = m }
-                        )
-                    }
-                }
-            }
+            item { SettingHeader("Data") }
+            item { ActionRow("Clear continue watching", "Removes saved progress") { vm.clearProgress() } }
+            item { ActionRow("Clear favorites", "Removes all favorites") { vm.clearFavs() } }
+            item { SettingHeader("About") }
+            item { Text("Lumora 1.5.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
         }
     }
+    if (pinDialog) PinDialog(vm) { pinDialog = false }
 }
 
 @Composable
@@ -465,86 +338,6 @@ fun ActionRow(title: String, sub: String, onClick: () -> Unit) {
         Text(title)
         Text(sub, fontSize = 12.sp, color = Color.Gray)
     }
-}
-
-@Composable
-fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
-    var pinDialog by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { vm.showSettings = false }) { Icon(Icons.Default.ArrowBack, "Back") }
-            Text("Settings", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        }
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item { SettingHeader("Sources") }
-            items(vm.sources.toList()) { s ->
-                val on = s.id == vm.activeSrc
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                        .background(if (on) Color(0xFF2A1520) else MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable { vm.selectSource(s.id) }.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(s.name.ifBlank { s.url }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(s.type.uppercase() + (if (on) " · active" else ""), fontSize = 12.sp, color = Color.Gray)
-                    }
-                    if (TvLink.paired()) IconButton(onClick = { vm.sendSourceToTv(s) }) { Icon(Icons.Default.Cast, "Send to TV") }
-                    IconButton(onClick = { onEdit(s) }) { Icon(Icons.Default.Edit, "Edit") }
-                }
-            }
-            item {
-                Button(
-                    onClick = { onEdit(Source("s" + System.currentTimeMillis().toString(36), "", "xtream", "")) },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("+ Add source") }
-            }
-            item { SettingHeader("Browsing") }
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Sort categories", Modifier.weight(1f))
-                    FilterChip(vm.sort == "count", { vm.changeSort("count") }, { Text("Most items") })
-                    Spacer(Modifier.width(6.dp))
-                    FilterChip(vm.sort == "az", { vm.changeSort("az") }, { Text("A-Z") })
-                }
-            }
-            item { SettingHeader("Playback") }
-            item { SwitchRow("Resume where I stopped", vm.resumeOn) { v -> vm.setResume(v) } }
-            item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.changeCastOn(v) } }
-            item { SettingHeader("Appearance") }
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Accent color", Modifier.weight(1f))
-                    vm.accents.forEachIndexed { i, c ->
-                        Box(
-                            Modifier.padding(start = 8.dp).size(if (i == vm.accentIdx) 30.dp else 24.dp)
-                                .clip(CircleShape).background(Color(c)).clickable { vm.changeAccent(i) }
-                        )
-                    }
-                }
-            }
-            item { SettingHeader("Downloads (offline)") }
-            if (vm.downloads.isEmpty()) item { Text("No downloads yet. Use the long-press menu on a movie or episode.", color = Color.Gray, fontSize = 13.sp) }
-            items(vm.downloads.toList()) { d -> DownloadRow(vm, d) }
-            item { SettingHeader("Parental control") }
-            item {
-                ActionRow(
-                    if (vm.pin.isEmpty()) "Set adult PIN" else "Change or remove adult PIN",
-                    "Adult categories ask for a 4-digit PIN"
-                ) { pinDialog = true }
-            }
-            item { SettingHeader("Data") }
-            item { ActionRow("Clear continue watching", "Removes saved progress") { vm.clearProgress() } }
-            item { ActionRow("Clear favorites", "Removes all favorites") { vm.clearFavs() } }
-            item { SettingHeader("About") }
-            item { Text("Lumora 1.4.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
-        }
-    }
-    if (pinDialog) PinDialog(vm) { pinDialog = false }
 }
 
 @Composable
@@ -734,150 +527,11 @@ fun SourceForm(vm: AppVM, start: Source, close: () -> Unit) {
 }
 
 @Composable
-fun CatalogTab(vm: AppVM) {
-    val kinds = listOf("live" to "Live", "vod" to "Movies", "series" to "Series")
-    var k by remember { mutableStateOf(1) }
-    var group by remember { mutableStateOf<String?>(null) }
-    var pending by remember { mutableStateOf<String?>(null) }
-    var gq by remember { mutableStateOf("") }
-    val kind = kinds[k].first
-    LaunchedEffect(kind, vm.activeSrc) { vm.load(kind) }
-    val all = vm.catalog[kind] ?: emptyList()
-    val groups = remember(all, vm.sort) {
-        val counts = all.groupingBy { it.group }.eachCount()
-        if (vm.sort == "az") counts.keys.sortedBy { g -> g.lowercase() }
-        else counts.entries.sortedByDescending { e -> e.value }.map { e -> e.key }
-    }
-    val shown = groups.filter { g -> g.contains(gq.trim(), ignoreCase = true) }
-    Column(Modifier.fillMaxSize()) {
-        TabRow(k) {
-            kinds.forEachIndexed { i, p ->
-                Tab(k == i, { k = i; group = null; gq = "" }, text = { Text(p.second) })
-            }
-        }
-        if (vm.loading[kind] == true) {
-            Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        } else if (vm.src() == null) {
-            Text("No sources yet", Modifier.padding(24.dp), color = Color.Gray)
-        } else {
-            Text(
-                (group ?: kinds[k].second).uppercase(),
-                Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp),
-                fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis
-            )
-            SortPills(vm)
-            OutlinedTextField(
-                value = gq,
-                onValueChange = { v -> gq = v },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                placeholder = { Text("Search categories") }
-            )
-            if (shown.isNotEmpty()) {
-                LazyRow(
-                    Modifier.padding(vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp)
-                ) {
-                    item { FilterChip(group == null, { group = null }, { Text("All") }) }
-                    items(shown) { g ->
-                        FilterChip(
-                            group == g,
-                            { if (vm.locked(g)) pending = g else group = g },
-                            { Text(g, maxLines = 1) }
-                        )
-                    }
-                }
-            }
-            PosterGrid(vm, if (group == null) all else all.filter { it.group == group }, Modifier.weight(1f))
-        }
-    }
-    pending?.let { g -> PinUnlock(vm, { group = g; pending = null }) { pending = null } }
-}
-
-@Composable
-fun SearchTab(vm: AppVM) {
-    var q by remember { mutableStateOf("") }
-    LaunchedEffect(vm.activeSrc) { listOf("live", "vod", "series").forEach { vm.load(it) } }
-    Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            q, { q = it }, Modifier.fillMaxWidth().padding(10.dp), singleLine = true,
-            placeholder = { Text("Search channels, movies and series") }
-        )
-        SortPills(vm)
-        val everything = (vm.catalog["live"] ?: emptyList()) + (vm.catalog["vod"] ?: emptyList()) + (vm.catalog["series"] ?: emptyList())
-        val res = remember(q, everything.size) {
-            if (q.trim().length < 2) emptyList() else everything.filter { it.name.contains(q.trim(), true) }.take(200)
-        }
-        if (q.trim().length < 2) Text("Type to search", Modifier.padding(24.dp), color = Color.Gray)
-        else PosterGrid(vm, res, Modifier.weight(1f))
-    }
-}
-
-@Composable
-fun SeriesDialog(vm: AppVM, serie: Item) {
-    AlertDialog(
-        onDismissRequest = { vm.seriesOpen = null },
-        title = { Text(serie.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-        text = {
-            if (vm.episodesLoading) {
-                Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            } else {
-                LazyColumn(Modifier.height(380.dp)) {
-                    items(vm.episodes) { e ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable {
-                                vm.seriesOpen = null
-                                val s = vm.srcOf(e.srcId) ?: vm.src()
-                                if (s != null) {
-                                    vm.playOrCast(PlayReq(Xtream.resolve(s, e), serie.name + " · " + e.name, "ep", e, s))
-                                }
-                            }.padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("S${e.season}E${e.num}", Modifier.width(64.dp), color = Color.Gray, fontSize = 12.sp)
-                            Text(e.name, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            IconButton(onClick = { vm.download(e.copy(name = serie.name + " · " + e.name)) }) {
-                                Icon(Icons.Default.Download, "Download")
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { vm.seriesOpen = null }) { Text("Close") } }
-    )
-}
-
-@Composable
 fun ActionLine(t: String, onClick: () -> Unit) {
     TextButton(onClick = onClick, Modifier.fillMaxWidth()) { Text(t, Modifier.fillMaxWidth()) }
 }
 
 /** Long-press menu on any poster. */
-@Composable
-fun ItemActions(vm: AppVM, item: Item) {
-    val close = { vm.actionItem = null }
-    AlertDialog(
-        onDismissRequest = close,
-        title = { Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (item.kind == "series") {
-                    ActionLine("Open episodes") { close(); vm.open(item) }
-                } else {
-                    ActionLine("Play on this phone") { close(); vm.playHere(item) }
-                }
-                if (item.kind == "vod") ActionLine("Download for offline") { close(); vm.download(item) }
-                ActionLine(if (vm.isFav(item)) "Remove from favorites" else "Add to favorites") {
-                    vm.toggleFav(item)
-                    close()
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = close) { Text("Close") } }
-    )
-}
 
 @Composable
 fun CastSheet(vm: AppVM, close: () -> Unit) {

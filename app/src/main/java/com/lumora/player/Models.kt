@@ -37,24 +37,37 @@ data class Item(
     val season: Int = 0,
     val num: Int = 0,
     val added: Long = 0L,
-    val rating: Double = 0.0
+    val rating: Double = 0.0,
+    val plot: String = "",
+    val info: String = "",
+    val parent: String = ""
 ) {
     val key: String get() = "$srcId|$kind|$id"
 
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("group", group)
         .put("logo", logo).put("kind", kind).put("ext", ext).put("url", url).put("srcId", srcId)
         .put("season", season).put("num", num).put("added", added).put("rating", rating)
+        .put("plot", plot).put("info", info).put("parent", parent)
 
     companion object {
         fun from(o: JSONObject) = Item(
             o.optString("id"), o.optString("name"), o.optString("group"), o.optString("logo"),
             o.optString("kind", "live"), o.optString("ext"), o.optString("url"), o.optString("srcId"),
-            o.optInt("season"), o.optInt("num"), o.optLong("added"), o.optDouble("rating", 0.0)
+            o.optInt("season"), o.optInt("num"), o.optLong("added"), o.optDouble("rating", 0.0),
+            o.optString("plot"), o.optString("info"), o.optString("parent")
         )
     }
 }
 
 data class Progress(val item: Item, val pos: Long, val dur: Long, val ts: Long)
+
+data class Meta(
+    val plot: String = "", val genre: String = "", val year: String = "", val rating: Double = 0.0,
+    val duration: String = "", val cast: String = "", val director: String = "", val backdrop: String = "",
+    val poster: String = ""
+)
+
+data class GroupRef(val kind: String, val name: String)
 
 data class Viewed(val item: Item, val count: Int)
 

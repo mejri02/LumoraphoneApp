@@ -15,6 +15,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import kotlinx.coroutines.Job
 
 data class PlayReq(val url: String, val title: String, val kind: String, val item: Item?, val src: Source?)
 
@@ -48,10 +49,18 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var activeSrc by mutableStateOf("")
     var message by mutableStateOf("")
     var playing by mutableStateOf<PlayReq?>(null)
-    var seriesOpen by mutableStateOf<Item?>(null)
+    var detail by mutableStateOf<Item?>(null)
+    var meta by mutableStateOf<Meta?>(null)
+    var openGroup by mutableStateOf<GroupRef?>(null)
+    var playList by mutableStateOf<List<Item>>(emptyList())
+    var full by mutableStateOf(false)
+    var pip by mutableStateOf(false)
     var actionItem by mutableStateOf<Item?>(null)
     var episodes by mutableStateOf<List<Item>>(emptyList())
     var episodesLoading by mutableStateOf(false)
+    val updatedAt = mutableStateMapOf<String, Long>()
+    var refreshHours by mutableStateOf(Store.getString("refreshH", "6").toIntOrNull() ?: 6)
+    private var detailJob: Job? = null
     var showSettings by mutableStateOf(false)
     var sort by mutableStateOf(Store.getString("sort", "count"))
     var itemSort by mutableStateOf(Store.getString("itemSort", "latest"))
@@ -118,28 +127,86 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun loadKey(s: Source, kind: String) = if (s.type == "xtream") kind else "all"
+
+    fun isLoading(kind: String): Boolean {
+        val s = src() ?: return false
+        return loading[loadKey(s, kind)] == true
+    }
+
+    private fun stale(s: Source, kind: String): Boolean {
+        val t = CatalogCache.time(s.id, kind)
+        if (t == 0L) return true
+        if (refreshHours <= 0) return false
+        return System.currentTimeMillis() - t > refreshHours * 3_600_000L
+    }
+
+    /** Opens the lists from the phone storage first (instant), then refreshes from the server only when they are old. */
     fun load(kind: String, force: Boolean = false) {
         val s = src() ?: return
-        if (!force && catalog.containsKey(kind)) return
-        if (loading[kind] == true) return
-        loading[kind] = true
+        val key = loadKey(s, kind)
+        if (loading[key] == true) return
+        val have = catalog.containsKey(kind)
+        if (have && !force && !stale(s, kind)) return
+        loading[key] = true
         viewModelScope.launch {
             try {
-                if (s.type == "xtream") {
-                    catalog[kind] = Xtream.catalog(s, kind)
-                } else {
-                    val t = Net.text(s.url.trim(), 180)
-                    val r = M3u.parse(t, s.id)
-                    catalog["live"] = r.first
-                    catalog["vod"] = r.second
-                    catalog["series"] = emptyList()
+                if (!have && !force) {
+                    val kinds = if (s.type == "xtream") listOf(kind) else listOf("live", "vod", "series")
+                    for (k in kinds) {
+                        val c = CatalogCache.read(s.id, k)
+                        if (c != null && src()?.id == s.id) {
+                            catalog[k] = c
+                            updatedAt[k] = CatalogCache.time(s.id, k)
+                        }
+                    }
+                }
+                if (force || !catalog.containsKey(kind) || stale(s, kind)) {
+                    if (s.type == "xtream") {
+                        val list = Xtream.catalog(s, kind)
+                        CatalogCache.write(s.id, kind, list)
+                        if (src()?.id == s.id) {
+                            catalog[kind] = list
+                            updatedAt[kind] = System.currentTimeMillis()
+                        }
+                    } else {
+                        val t = Net.text(s.url.trim(), 180)
+                        val r = M3u.parse(t, s.id)
+                        CatalogCache.write(s.id, "live", r.first)
+                        CatalogCache.write(s.id, "vod", r.second)
+                        CatalogCache.write(s.id, "series", emptyList())
+                        if (src()?.id == s.id) {
+                            catalog["live"] = r.first
+                            catalog["vod"] = r.second
+                            catalog["series"] = emptyList()
+                            val now = System.currentTimeMillis()
+                            updatedAt["live"] = now; updatedAt["vod"] = now; updatedAt["series"] = now
+                        }
+                    }
                 }
             } catch (e: Exception) {
-                message = e.message ?: "Network error"
-                catalog[kind] = emptyList()
+                if (!catalog.containsKey(kind)) catalog[kind] = emptyList()
+                if (force || (catalog[kind]?.isEmpty() != false)) message = e.message ?: "Network error"
             }
-            loading[kind] = false
+            loading[key] = false
         }
+    }
+
+    fun refreshAll() {
+        listOf("live", "vod", "series").forEach { load(it, force = true) }
+        message = "Updating lists…"
+    }
+
+    fun changeRefresh(h: Int) {
+        refreshHours = h
+        Store.putString("refreshH", h.toString())
+    }
+
+    fun clearCache() {
+        CatalogCache.clear()
+        catalog.clear()
+        updatedAt.clear()
+        message = "Saved lists cleared"
     }
 
     // ---------- sorting of posters ----------
@@ -168,30 +235,119 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------- playback ----------
-    fun open(it: Item) {
+    /** Opens the detail page. Movies / episodes show Play; channels start immediately; series show seasons + episodes. */
+    fun open(it: Item, auto: Boolean = false) {
         val s = srcOf(it.srcId) ?: src() ?: return
-        if (it.kind == "series") {
-            seriesOpen = it
-            episodes = emptyList()
-            episodesLoading = true
-            viewModelScope.launch {
-                try {
-                    episodes = Xtream.episodes(s, it)
-                } catch (e: Exception) {
-                    message = e.message ?: "Network error"
-                }
-                episodesLoading = false
+        detailJob?.cancel()
+        playing = null
+        full = false
+        meta = null
+        episodes = emptyList()
+        episodesLoading = false
+        playList = emptyList()
+        when (it.kind) {
+            "series" -> {
+                detail = it
+                loadSeries(s, it, null, auto)
             }
-            return
+            "ep" -> {
+                if (it.parent.isNotEmpty()) {
+                    val stub = Item(it.parent, it.name.substringBefore(" · "), it.group, it.logo, "series", srcId = it.srcId)
+                    detail = stub
+                    loadSeries(s, stub, it, true)
+                } else {
+                    detail = it
+                    play(it)
+                }
+            }
+            "live" -> {
+                detail = it
+                val all = catalog["live"] ?: emptyList()
+                playList = sortItems(all.filter { x -> x.group == it.group })
+                play(it)
+            }
+            else -> {
+                detail = it
+                detailJob = viewModelScope.launch {
+                    try {
+                        if (s.type == "xtream" && it.url.isEmpty()) meta = Xtream.vodMeta(s, it)
+                    } catch (_: Exception) {
+                    }
+                }
+                if (auto) play(it)
+            }
         }
+    }
+
+    private fun loadSeries(s: Source, serie: Item, autoEp: Item?, autoFirst: Boolean) {
+        episodesLoading = true
+        detailJob = viewModelScope.launch {
+            try {
+                val r = Xtream.series(s, serie)
+                meta = r.first
+                episodes = r.second
+                playList = r.second
+                if (autoEp != null) {
+                    r.second.firstOrNull { e -> e.id == autoEp.id }?.let { e -> playEpisode(serie, e) }
+                } else if (autoFirst) {
+                    nextEpisodeFor(serie)?.let { e -> playEpisode(serie, e) }
+                }
+            } catch (e: Exception) {
+                message = e.message ?: "Network error"
+            }
+            episodesLoading = false
+        }
+    }
+
+    /** The episode to continue (last watched of this series) or the first one. */
+    fun nextEpisodeFor(serie: Item): Item? {
+        val last = progress.firstOrNull { p -> p.item.parent == serie.id && p.item.srcId == serie.srcId }
+        val e = last?.let { l -> episodes.firstOrNull { x -> x.id == l.item.id } }
+        return e ?: episodes.firstOrNull()
+    }
+
+    fun playEpisode(serie: Item, e: Item) {
+        val named = e.copy(
+            name = serie.name + " · S" + e.season + "E" + e.num,
+            logo = e.logo.ifBlank { serie.logo }, parent = serie.id
+        )
+        play(named)
+    }
+
+    fun play(it: Item) {
+        val s = srcOf(it.srcId) ?: src() ?: return
         bumpView(it)
         playOrCast(PlayReq(Xtream.resolve(s, it), it.name, it.kind, it, s))
     }
 
-    fun playHere(it: Item) {
-        val s = srcOf(it.srcId) ?: src() ?: return
-        bumpView(it)
-        playing = PlayReq(Xtream.resolve(s, it), it.name, it.kind, it, s)
+    fun closeDetail() {
+        playing = null
+        detail = null
+        full = false
+        meta = null
+        detailJob?.cancel()
+    }
+
+    fun canStep(delta: Int): Boolean {
+        val cur = playing?.item ?: return false
+        val i = playList.indexOfFirst { x -> x.id == cur.id }
+        return i >= 0 && (i + delta) in playList.indices
+    }
+
+    fun step(delta: Int) {
+        val cur = playing?.item ?: return
+        val i = playList.indexOfFirst { x -> x.id == cur.id }
+        val n = playList.getOrNull(i + delta) ?: return
+        zapTo(n)
+    }
+
+    fun zapTo(n: Item) {
+        val d = detail ?: return
+        if (n.kind == "ep") playEpisode(d, n) else {
+            detail = n
+            meta = null
+            play(n)
+        }
     }
 
     /** Sends to the TV when "Play on TV" is on and a TV is linked; otherwise plays on this phone. */
@@ -221,7 +377,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val ok = TvLink.sendWhenReachable("cast", castData(p, startSec))
             message = if (ok) "Sent to TV" else "Could not reach the TV (same Wi-Fi?)"
-            if (ok && closePlayer) playing = null
+            if (ok && closePlayer) { playing = null; full = false }
         }
     }
 
@@ -238,6 +394,22 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         return data
     }
 
+    fun castItem(it: Item) {
+        if (!TvLink.paired()) {
+            message = "Link a TV first"
+            return
+        }
+        val s = srcOf(it.srcId) ?: src() ?: return
+        val target = if (it.kind == "series") {
+            nextEpisodeFor(it)?.let { e -> e.copy(name = it.name + " · S" + e.season + "E" + e.num, logo = e.logo.ifBlank { it.logo }, parent = it.id) }
+        } else it
+        if (target == null) {
+            message = "Episodes are still loading"
+            return
+        }
+        cast(PlayReq(Xtream.resolve(s, target), target.name, target.kind, target, s), (progressOf(target) ?: 0L) / 1000, true)
+    }
+
     fun sendSourceToTv(s: Source) {
         val m = JSONObject().put("type", s.type).put("url", s.url).put("user", s.user).put("pass", s.pass)
             .put("name", s.name).put("format", s.format)
@@ -249,7 +421,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     // ---------- continue watching ----------
     fun saveProgress(item: Item, pos: Long, dur: Long) {
-        if (item.kind == "live" || pos < 30_000L) return
+        if (item.kind == "live" || pos < 8_000L) return
         val finished = dur > 0 && pos > dur * 0.95
         progress.removeAll { p -> p.item.key == item.key }
         if (!finished) progress.add(0, Progress(item, pos, dur, System.currentTimeMillis()))
@@ -259,6 +431,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun progressOf(item: Item): Long? = progress.firstOrNull { p -> p.item.key == item.key }?.pos?.takeIf { it > 0 }
 
     fun continueWatching(): List<Progress> = progress.take(20)
+
+    fun removeProgress(item: Item) {
+        progress.removeAll { p -> p.item.key == item.key }
+        Store.saveProgress(progress)
+    }
 
     fun clearProgress() {
         progress.clear()
@@ -359,6 +536,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             message = "Not downloaded yet"
             return
         }
+        showSettings = false
+        detailJob?.cancel()
+        detail = d.item
+        meta = null
+        episodes = emptyList()
+        playList = emptyList()
         playing = PlayReq(uri.toString(), d.item.name, d.item.kind, d.item, srcOf(d.item.srcId))
     }
 
