@@ -32,6 +32,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.TextButton
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,6 +70,9 @@ fun PlayerScreen(vm: AppVM, req: PlayReq) {
     var resize by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     val handler = remember { Handler(Looper.getMainLooper()) }
     val live = req.kind == "live"
+    val resumeAt = remember(req.url) { if (live || !vm.resumeOn) 0L else (req.item?.let { vm.progressOf(it) } ?: 0L) }
+    var resumed by remember { mutableStateOf(false) }
+    var speed by remember { mutableStateOf(1f) }
 
     val exo = remember(req.url) {
         val ds = OkHttpDataSource.Factory(Net.client).setUserAgent(Net.UA)
@@ -83,6 +89,7 @@ fun PlayerScreen(vm: AppVM, req: PlayReq) {
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
                 if (state == Player.STATE_READY) {
+                    if (!resumed) { resumed = true; if (resumeAt > 0L) exo.seekTo(resumeAt) }
                     errorMsg = ""
                     retries = 0
                 }
@@ -104,9 +111,17 @@ fun PlayerScreen(vm: AppVM, req: PlayReq) {
         }
         exo.addListener(l)
         onDispose {
+            req.item?.let { if (!live) vm.saveProgress(it, exo.currentPosition, exo.duration) }
             handler.removeCallbacksAndMessages(null)
             exo.removeListener(l)
             exo.release()
+        }
+    }
+
+    LaunchedEffect(exo) {
+        while (true) {
+            delay(5000)
+            req.item?.let { if (!live && exo.isPlaying) vm.saveProgress(it, exo.currentPosition, exo.duration) }
         }
     }
 
@@ -213,6 +228,11 @@ fun PlayerScreen(vm: AppVM, req: PlayReq) {
             }) {
                 Icon(Icons.Default.AspectRatio, "Aspect", tint = Color.White)
             }
+
+            if (!live) TextButton(onClick = {
+                speed = when (speed) { 1f -> 1.25f; 1.25f -> 1.5f; 1.5f -> 2f; 2f -> 0.5f; else -> 1f }
+                exo.setPlaybackSpeed(speed)
+            }) { Text(speed.toString().removeSuffix(".0") + "x", color = Color.White) }
 
             IconButton(onClick = {
                 act.requestedOrientation =

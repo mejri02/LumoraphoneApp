@@ -39,6 +39,12 @@ import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -143,6 +149,7 @@ fun Root(vm: AppVM) {
                         color = if (tv?.online == true) Color(0xFF4ADE80) else Color(0xFFFBBF24), fontSize = 13.sp
                     )
                     IconButton(onClick = { castSheet = true }) { Icon(Icons.Default.Cast, "Cast") }
+                    IconButton(onClick = { vm.showSettings = true }) { Icon(Icons.Default.Settings, "Settings") }
                 }
             },
             bottomBar = {
@@ -156,7 +163,7 @@ fun Root(vm: AppVM) {
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
                 when (tab) {
-                    0 -> HomeTab(vm, onEdit = { form = it })
+                    0 -> HomeTab(vm, onSeeAll = { tab = 1 })
                     1 -> CatalogTab(vm)
                     2 -> ItemList(vm, vm.favs.toList())
                     else -> SearchTab(vm)
@@ -164,6 +171,7 @@ fun Root(vm: AppVM) {
             }
         }
 
+        if (vm.showSettings) SettingsScreen(vm, onEdit = { form = it })
         if (form != null) SourceForm(vm, form!!) { form = null }
         if (castSheet) CastSheet(vm) { castSheet = false }
         vm.seriesOpen?.let { SeriesDialog(vm, it) }
@@ -172,32 +180,229 @@ fun Root(vm: AppVM) {
 }
 
 @Composable
-fun HomeTab(vm: AppVM, onEdit: (Source) -> Unit) {
-    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item {
-            Button(
-                onClick = { onEdit(Source("s" + System.currentTimeMillis().toString(36), "", "xtream", "")) },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("+ Add source") }
+fun SectionHeader(title: String, action: String?, onAction: () -> Unit = {}) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 18.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        if (action != null) TextButton(onClick = onAction) { Text(action, color = MaterialTheme.colorScheme.primary) }
+    }
+}
+
+@Composable
+fun TileCard(item: Item, w: Int, ratio: Float, progress: Float = -1f, onClick: () -> Unit) {
+    Column(Modifier.width(w.dp).clickable { onClick() }) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(ratio).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1C1C22))
+        ) {
+            if (item.logo.startsWith("http")) AsyncImage(item.logo, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else Text(item.name.take(2).uppercase(), Modifier.align(Alignment.Center), color = Color.Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            if (progress >= 0f) Box(
+                Modifier.align(Alignment.BottomStart).fillMaxWidth(progress.coerceIn(0f, 1f)).height(4.dp).background(Color(0xFFE5173F))
+            )
         }
-        if (vm.sources.isEmpty()) item { Text("No sources yet", Modifier.padding(24.dp), color = Color.Gray) }
-        items(vm.sources.toList()) { s ->
-            val on = s.id == vm.activeSrc
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                    .background(if (on) Color(0xFF2A1520) else MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { vm.selectSource(s.id) }.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(s.name.ifBlank { s.url }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(s.type.uppercase() + (if (on) " · active" else ""), fontSize = 12.sp, color = Color.Gray)
+        Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+@Composable
+fun HomeTab(vm: AppVM, onSeeAll: () -> Unit) {
+    LaunchedEffect(vm.activeSrc) { vm.load("live"); vm.load("vod") }
+    val cw = vm.continueWatching()
+    val channels = vm.mostViewed().map { v -> v.item }.ifEmpty { (vm.catalog["live"] ?: emptyList()).take(12) }
+    val movies = (vm.catalog["vod"] ?: emptyList()).sortedByDescending { m -> m.id.toIntOrNull() ?: 0 }.take(12)
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
+        item {
+            Text("Home", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp))
+        }
+        if (vm.sources.isEmpty()) item { Text("Add a source in Settings to start", Modifier.padding(16.dp), color = Color.Gray) }
+        if (cw.isNotEmpty()) {
+            item { SectionHeader("Continue watching", null) }
+            item {
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(cw) { p ->
+                        TileCard(p.item, 140, 2f / 3f, if (p.dur > 0) p.pos.toFloat() / p.dur.toFloat() else 0f) { vm.open(p.item) }
+                    }
                 }
-                if (TvLink.paired()) IconButton(onClick = { vm.sendSourceToTv(s) }) { Icon(Icons.Default.Cast, "Send to TV") }
-                IconButton(onClick = { onEdit(s) }) { Icon(Icons.Default.Edit, "Edit") }
+            }
+        }
+        if (channels.isNotEmpty()) {
+            item { SectionHeader("Most viewed", "See all", onSeeAll) }
+            item {
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(channels) { ch -> TileCard(ch, 120, 1f) { vm.open(ch) } }
+                }
+            }
+        }
+        if (movies.isNotEmpty()) {
+            item { SectionHeader("New releases (Movies)", "See all", onSeeAll) }
+            item {
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(movies) { m -> TileCard(m, 120, 2f / 3f) { vm.open(m) } }
+                }
             }
         }
     }
+}
+
+@Composable
+fun SettingHeader(t: String) {
+    Text(t, Modifier.padding(top = 14.dp, bottom = 2.dp), color = MaterialTheme.colorScheme.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+}
+
+@Composable
+fun SwitchRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, Modifier.weight(1f))
+        Switch(checked, onChange)
+    }
+}
+
+@Composable
+fun ActionRow(title: String, sub: String, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { onClick() }.padding(14.dp)
+    ) {
+        Text(title)
+        Text(sub, fontSize = 12.sp, color = Color.Gray)
+    }
+}
+
+@Composable
+fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
+    var pinDialog by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { vm.showSettings = false }) { Icon(Icons.Default.ArrowBack, "Back") }
+            Text("Settings", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item { SettingHeader("Sources") }
+            items(vm.sources.toList()) { s ->
+                val on = s.id == vm.activeSrc
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .background(if (on) Color(0xFF2A1520) else MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { vm.selectSource(s.id) }.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(s.name.ifBlank { s.url }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(s.type.uppercase() + (if (on) " · active" else ""), fontSize = 12.sp, color = Color.Gray)
+                    }
+                    if (TvLink.paired()) IconButton(onClick = { vm.sendSourceToTv(s) }) { Icon(Icons.Default.Cast, "Send to TV") }
+                    IconButton(onClick = { onEdit(s) }) { Icon(Icons.Default.Edit, "Edit") }
+                }
+            }
+            item {
+                Button(
+                    onClick = { onEdit(Source("s" + System.currentTimeMillis().toString(36), "", "xtream", "")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("+ Add source") }
+            }
+            item { SettingHeader("Browsing") }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Sort categories", Modifier.weight(1f))
+                    FilterChip(vm.sort == "count", { vm.setSort("count") }, { Text("Most items") })
+                    Spacer(Modifier.width(6.dp))
+                    FilterChip(vm.sort == "az", { vm.setSort("az") }, { Text("A-Z") })
+                }
+            }
+            item { SettingHeader("Playback") }
+            item { SwitchRow("Resume where I stopped", vm.resumeOn) { v -> vm.setResume(v) } }
+            item { SettingHeader("Parental control") }
+            item {
+                ActionRow(
+                    if (vm.pin.isEmpty()) "Set adult PIN" else "Change or remove adult PIN",
+                    "Adult categories ask for a 4-digit PIN"
+                ) { pinDialog = true }
+            }
+            item { SettingHeader("Data") }
+            item { ActionRow("Clear continue watching", "Removes saved progress") { vm.clearProgress() } }
+            item { ActionRow("Clear favorites", "Removes all favorites") { vm.clearFavs() } }
+            item { SettingHeader("About") }
+            item { Text("Lumora 1.1.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
+        }
+    }
+    if (pinDialog) PinDialog(vm) { pinDialog = false }
+}
+
+@Composable
+fun PinDialog(vm: AppVM, close: () -> Unit) {
+    var p by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text(if (vm.pin.isEmpty()) "Set adult PIN" else "Change adult PIN") },
+        text = {
+            OutlinedTextField(
+                value = p,
+                onValueChange = { v -> if (v.length <= 4 && v.all { c -> c.isDigit() }) { p = v } },
+                label = { Text("4-digit PIN (empty removes it)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                visualTransformation = PasswordVisualTransformation()
+            )
+        },
+        confirmButton = {
+            Button(onClick = {
+                if (p.isEmpty() || p.length == 4) {
+                    vm.setPin(p)
+                    vm.toast(if (p.isEmpty()) "PIN removed" else "PIN saved")
+                    close()
+                }
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = close) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun PinUnlock(vm: AppVM, onOk: () -> Unit, close: () -> Unit) {
+    var p by remember { mutableStateOf("") }
+    var wrong by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text("Adult category") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Enter your PIN to open this category", fontSize = 13.sp, color = Color.Gray)
+                OutlinedTextField(
+                    value = p,
+                    onValueChange = { v -> p = v.take(4) },
+                    singleLine = true,
+                    isError = wrong,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                if (wrong) Text("Wrong PIN", color = Color(0xFFFF6B6B), fontSize = 13.sp)
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                if (p == vm.pin) { vm.unlocked = true; onOk() } else { wrong = true; p = "" }
+            }) { Text("Unlock") }
+        },
+        dismissButton = { TextButton(onClick = close) { Text("Cancel") } }
+    )
 }
 
 @Composable
@@ -265,22 +470,34 @@ fun CatalogTab(vm: AppVM) {
     val kinds = listOf("live" to "Live", "vod" to "Movies", "series" to "Series")
     var k by remember { mutableStateOf(0) }
     var group by remember { mutableStateOf<String?>(null) }
+    var pending by remember { mutableStateOf<String?>(null) }
     val kind = kinds[k].first
     LaunchedEffect(kind, vm.activeSrc) { vm.load(kind) }
     val items = vm.catalog[kind] ?: emptyList()
-    val groups = remember(items) { items.map { it.group }.distinct() }
+    val groups = remember(items, vm.sort) {
+        val counts = items.groupingBy { it.group }.eachCount()
+        if (vm.sort == "az") counts.keys.sortedBy { g -> g.lowercase() }
+        else counts.entries.sortedByDescending { e -> e.value }.map { e -> e.key }
+    }
     Column(Modifier.fillMaxSize()) {
         TabRow(k) { kinds.forEachIndexed { i, p -> Tab(k == i, { k = i; group = null }, text = { Text(p.second) }) } }
         if (vm.loading[kind] == true) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else if (vm.src() == null) Text("No sources yet", Modifier.padding(24.dp), color = Color.Gray)
         else {
-            if (groups.size > 1) LazyRow(Modifier.padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)) {
+            if (groups.size > 1) LazyRow(
+                Modifier.padding(vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)
+            ) {
                 item { FilterChip(group == null, { group = null }, { Text("All") }) }
-                items(groups) { g -> FilterChip(group == g, { group = g }, { Text(g, maxLines = 1) }) }
+                items(groups) { g ->
+                    FilterChip(group == g, { if (vm.locked(g)) { pending = g } else { group = g } }, { Text(g, maxLines = 1) })
+                }
             }
             ItemList(vm, if (group == null) items else items.filter { it.group == group })
         }
     }
+    pending?.let { g -> PinUnlock(vm, { group = g; pending = null }) { pending = null } }
 }
 
 @Composable

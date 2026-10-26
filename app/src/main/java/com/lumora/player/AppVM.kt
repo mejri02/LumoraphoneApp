@@ -12,9 +12,15 @@ import org.json.JSONObject
 
 data class PlayReq(val url: String, val title: String, val kind: String, val item: Item?, val src: Source?)
 
+val ADULT = Regex("xxx|adult|\\+18|18\\+|للكبار", RegexOption.IGNORE_CASE)
+
+fun AppVM.locked(group: String): Boolean = pin.isNotEmpty() && !unlocked && ADULT.containsMatchIn(group)
+
 class AppVM : ViewModel() {
     val sources = mutableStateListOf<Source>()
     val favs = mutableStateListOf<Item>()
+    val progress = mutableStateListOf<Progress>()
+    val viewed = mutableStateListOf<Viewed>()
     val catalog = mutableStateMapOf<String, List<Item>>()
     val loading = mutableStateMapOf<String, Boolean>()
 
@@ -24,10 +30,17 @@ class AppVM : ViewModel() {
     var seriesOpen by mutableStateOf<Item?>(null)
     var episodes by mutableStateOf<List<Item>>(emptyList())
     var episodesLoading by mutableStateOf(false)
+    var showSettings by mutableStateOf(false)
+    var sort by mutableStateOf(Store.getString("sort", "count"))
+    var resumeOn by mutableStateOf(Store.getBool("resume", true))
+    var pin by mutableStateOf(Store.getString("pin", ""))
+    var unlocked by mutableStateOf(false)
 
     init {
         sources.addAll(Store.sources())
         favs.addAll(Store.favs())
+        progress.addAll(Store.progress())
+        viewed.addAll(Store.views())
         activeSrc = Store.getString("activeSrc").ifEmpty { sources.firstOrNull()?.id ?: "" }
     }
 
@@ -112,6 +125,7 @@ class AppVM : ViewModel() {
             }
             return
         }
+        bumpView(it)
         val url = Xtream.resolve(s, it)
         if (TvLink.connected()) cast(PlayReq(url, it.name, it.kind, it, s), 0, true)
         else {
@@ -122,8 +136,40 @@ class AppVM : ViewModel() {
 
     fun playHere(it: Item) {
         val s = srcOf(it.srcId) ?: src() ?: return
+        bumpView(it)
         playing = PlayReq(Xtream.resolve(s, it), it.name, it.kind, it, s)
     }
+
+    // ---------- continue watching ----------
+    fun saveProgress(item: Item, pos: Long, dur: Long) {
+        if (item.kind == "live" || pos < 30_000L) return
+        val finished = dur > 0 && pos > dur * 0.95
+        progress.removeAll { p -> p.item.key == item.key }
+        if (!finished) progress.add(0, Progress(item, pos, dur, System.currentTimeMillis()))
+        Store.saveProgress(progress)
+    }
+
+    fun progressOf(item: Item): Long? = progress.firstOrNull { p -> p.item.key == item.key }?.pos?.takeIf { it > 0 }
+
+    fun continueWatching(): List<Progress> = progress.take(20)
+
+    fun clearProgress() { progress.clear(); Store.saveProgress(progress) }
+
+    // ---------- most viewed ----------
+    fun bumpView(item: Item) {
+        if (item.kind != "live") return
+        val i = viewed.indexOfFirst { v -> v.item.key == item.key }
+        if (i >= 0) viewed[i] = viewed[i].copy(count = viewed[i].count + 1) else viewed.add(Viewed(item, 1))
+        Store.saveViews(viewed)
+    }
+
+    fun mostViewed(): List<Viewed> = viewed.sortedByDescending { v -> v.count }.take(12)
+
+    // ---------- settings ----------
+    fun setSort(v: String) { sort = v; Store.putString("sort", v) }
+    fun setResume(v: Boolean) { resumeOn = v; Store.putBool("resume", v) }
+    fun setPin(v: String) { pin = v; unlocked = false; Store.putString("pin", v) }
+    fun clearFavs() { favs.clear(); Store.saveFavs(favs) }
 
     fun cast(p: PlayReq, startSec: Long, closePlayer: Boolean) {
         if (!TvLink.paired()) { message = "Link a TV first"; return }

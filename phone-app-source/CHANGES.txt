@@ -21,3 +21,9 @@ ADDITIONS (v3)
 - Now/Next program info for live channels (from the provider's EPG).
 - Picture-in-picture and fullscreen buttons; F for fullscreen, M to mute.
 - Sleep timer (15, 30, 60 minutes or off).
+
+ANDROID APP (Kotlin, built by GitHub Actions) v1.1.0
+- Home redesigned: Continue watching (movies/series, with progress bar and resume), Most viewed (channels, counted from plays), New releases (Movies).
+- Settings screen (gear icon): sources management, sort categories, resume toggle, adult PIN, clear data, about.
+- Adult categories locked behind a 4-digit PIN (asked when opening such a category).
+- Player: playback speed button (1x, 1.25x, 1.5x, 2x, 0.5x), progress saved every 5 seconds, resume on reopen.

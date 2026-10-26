@@ -52,6 +52,10 @@ data class Item(
     }
 }
 
+data class Progress(val item: Item, val pos: Long, val dur: Long, val ts: Long)
+
+data class Viewed(val item: Item, val count: Int)
+
 object Store {
     private lateinit var sp: SharedPreferences
 
@@ -91,7 +95,52 @@ object Store {
         sp.edit().putString("favs", a.toString()).apply()
     }
 
-    fun getString(k: String, d: String = ""): String = sp.getString(k, d) ?: d
+    private fun arr(k: String): JSONArray = try { JSONArray(sp.getString(k, "[]")) } catch (_: Exception) { JSONArray() }
+
+    fun progress(): MutableList<Progress> {
+        val out = mutableListOf<Progress>()
+        val a = arr("progress")
+        for (i in 0 until a.length()) {
+            try {
+                val o = a.getJSONObject(i)
+                out.add(Progress(Item.from(o.getJSONObject("item")), o.optLong("pos"), o.optLong("dur"), o.optLong("ts")))
+            } catch (_: Exception) {
+            }
+        }
+        return out
+    }
+
+    fun saveProgress(l: List<Progress>) {
+        val a = JSONArray()
+        l.forEach { a.put(JSONObject().put("item", it.item.toJson()).put("pos", it.pos).put("dur", it.dur).put("ts", it.ts)) }
+        sp.edit().putString("progress", a.toString()).apply()
+    }
+
+    fun views(): MutableList<Viewed> {
+        val out = mutableListOf<Viewed>()
+        val a = arr("views")
+        for (i in 0 until a.length()) {
+            try {
+                val o = a.getJSONObject(i)
+                out.add(Viewed(Item.from(o.getJSONObject("item")), o.optInt("count")))
+            } catch (_: Exception) {
+            }
+        }
+        return out
+    }
+
+    fun saveViews(l: List<Viewed>) {
+        val a = JSONArray()
+        l.forEach { a.put(JSONObject().put("item", it.item.toJson()).put("count", it.count)) }
+        sp.edit().putString("views", a.toString()).apply()
+    }
+
+    fun getBool(k: String, d: Boolean): Boolean = sp.getBoolean(k, d)
+    fun putBool(k: String, v: Boolean) {
+        sp.edit().putBoolean(k, v).apply()
+    }
+
+    fun getString(k: String, d: String = \"\"): String = sp.getString(k, d) ?: d
     fun putString(k: String, v: String) {
         sp.edit().putString(k, v).apply()
     }
