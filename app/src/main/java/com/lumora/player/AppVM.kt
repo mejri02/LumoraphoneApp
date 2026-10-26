@@ -231,7 +231,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun changeSort(v: String) { sort = v; Store.putString("sort", v) }
     fun changePin(v: String) { pin = v; unlocked = false; Store.putString("pin", v) }
     fun setResume(v: Boolean) { resumeOn = v; Store.putBool("resume", v) }
-    fun setCastOn(v: Boolean) {
+    fun changeCastOn(v: Boolean) {
         castOn = v; Store.putBool("castOn", v)
         message = if (v) "Playing on TV when it is connected" else "Cast off: playing on this phone"
     }

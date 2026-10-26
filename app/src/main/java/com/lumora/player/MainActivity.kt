@@ -359,7 +359,7 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             }
             item { SettingHeader("Playback") }
             item { SwitchRow("Resume where I stopped", vm.resumeOn) { v -> vm.setResume(v) } }
-            item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.setCastOn(v) } }
+            item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.changeCastOn(v) } }
             item { SettingHeader("Appearance") }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -665,7 +665,7 @@ fun CastSheet(vm: AppVM, close: () -> Unit) {
         title = { Text("Lumora TV") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.setCastOn(v) }
+                SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.changeCastOn(v) }
                 Text(
                     if (vm.castOn) "Movies and channels you open are sent to the TV." else "Cast is off. Everything plays on this phone. You can still cast from the player.",
                     fontSize = 12.sp, color = Color.Gray
