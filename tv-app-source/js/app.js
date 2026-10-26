@@ -3538,7 +3538,7 @@
     function linkListen() {
         linkStop();
         var tok = link.tok;
-        var since = link.lastT || (Math.floor(Date.now() / 1000) - 60);
+        var since = link.lastT || '3m';
         if (typeof EventSource === 'undefined') { linkPoll(tok); return; }
         var es;
         try { es = new EventSource(CFG.RELAY + link.topic + '/sse?since=' + since); } catch (e) { linkPoll(tok); return; }
@@ -3563,7 +3563,7 @@
     function linkPoll(tok) {
         if (tok !== link.tok) return;
         var x = new XMLHttpRequest();
-        var since = link.lastT || (Math.floor(Date.now() / 1000) - 60);
+        var since = link.lastT || '3m';
         x.open('GET', CFG.RELAY + link.topic + '/json?poll=1&since=' + since, true);
         x.timeout = 10000;
         function next() { if (tok === link.tok) link.pt = setTimeout(function () { linkPoll(tok); }, 3000); }

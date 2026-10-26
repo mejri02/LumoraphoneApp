@@ -78,6 +78,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -653,12 +655,25 @@ fun CastSheet(vm: AppVM, close: () -> Unit) {
     var code by remember { mutableStateOf("") }
     var nm by remember { mutableStateOf("") }
     val tvs = TvLink.list()
+    val scope = rememberCoroutineScope()
+    fun linkAndVerify(input: String, name: String): Boolean {
+        val id = TvLink.add(input, name)
+        if (id.isEmpty()) return false
+        vm.toast("Linking… waiting for the TV to answer")
+        scope.launch {
+            vm.toast(
+                when (TvLink.verify(id)) {
+                    "ok" -> "TV connected ✓"
+                    "relay" -> "Could not reach the relay server. Check the phone's internet."
+                    else -> "TV did not answer. Make sure the TV app is open on the link screen and has internet."
+                }
+            )
+        }
+        return true
+    }
     val scan = rememberLauncherForActivityResult(ScanContract()) { r ->
         val txt = r.contents
-        if (txt != null) {
-            val id = TvLink.add(txt, nm)
-            vm.toast(if (id.isEmpty()) "Not a Lumora TV code" else "TV linked")
-        }
+        if (txt != null && !linkAndVerify(txt, nm)) vm.toast("Not a Lumora TV code")
     }
     AlertDialog(
         onDismissRequest = close,
@@ -698,8 +713,7 @@ fun CastSheet(vm: AppVM, close: () -> Unit) {
                 OutlinedTextField(code, { code = it }, label = { Text("TV code") }, singleLine = true, placeholder = { Text("a3cc-db44-0851-2719") })
                 OutlinedTextField(nm, { nm = it }, label = { Text("TV name (optional)") }, singleLine = true)
                 OutlinedButton(onClick = {
-                    val id = TvLink.add(code, nm)
-                    if (id.isEmpty()) vm.toast("Invalid TV code") else { code = ""; nm = ""; vm.toast("TV linked") }
+                    if (!linkAndVerify(code, nm)) vm.toast("Invalid TV code") else { code = ""; nm = "" }
                 }, Modifier.fillMaxWidth()) { Text("Link with TV code") }
             }
         },

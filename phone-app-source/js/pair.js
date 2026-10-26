@@ -107,7 +107,7 @@ var Pair = (function () {
         clearTimeout(retryT);
         if (!st.tvs.length || typeof EventSource === 'undefined') return;
         var topics = st.tvs.map(function (t) { return topic(t.id) + '-tv'; }).join(',');
-        var since = Math.floor(Date.now() / 1000) - 3;
+        var since = '30s';
         var me;
         try { me = es = new EventSource(relay() + topics + '/sse?since=' + since); } catch (e) { return; }
         me.onopen = function () { sseUp = true; emit(); };

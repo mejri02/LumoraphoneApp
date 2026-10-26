@@ -150,6 +150,19 @@ object TvLink {
         return id
     }
 
+    /** Pings the TV and waits for a real reply. Returns "ok", "relay" (cannot reach relay) or "tv" (no answer from TV). */
+    suspend fun verify(id: String, ms: Long = 12000): String {
+        val t0 = System.currentTimeMillis()
+        var posted = false
+        try { post(id, mk("hello", JSONObject().put("device", "phone").put("name", "Lumora Phone"))); posted = true } catch (_: Exception) { }
+        if (!posted) return "relay"
+        while (System.currentTimeMillis() - t0 < ms) {
+            if ((seen[id] ?: 0L) >= t0) return "ok"
+            delay(300)
+        }
+        return "tv"
+    }
+
     fun select(id: String) {
         if (tvs.none { it.id == id }) return
         active = id; save(); ping(id); emit()
@@ -171,7 +184,7 @@ object TvLink {
             while (isActive) {
                 try {
                     val topics = tvs.joinToString(",") { topic(it.id) + "-tv" }
-                    val since = System.currentTimeMillis() / 1000 - 3
+                    val since = "30s"
                     val req = Request.Builder().url(relay() + topics + "/sse?since=" + since)
                         .header("Accept", "text/event-stream").build()
                     val c = Net.client.newBuilder().readTimeout(0, TimeUnit.SECONDS).build()
