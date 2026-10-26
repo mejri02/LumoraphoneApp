@@ -1,0 +1,13 @@
+{
+  "name": "lumora-phone",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lumora Phone Android application",
+  "dependencies": {
+    "@capacitor/core": "6.2.1",
+    "@capacitor/android": "6.2.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "6.2.1"
+  }
+}
