@@ -1,23 +1,39 @@
-LUMORA PLAYER (native Android) - build in the cloud, no Android Studio needed
+Lumora TV
 
-1. Create a free account at github.com and a NEW repository (private is fine).
-2. Upload ALL files of this folder to the repository (keep the .github folder).
-   (Easiest: on the repo page choose "Add file > Upload files" and drag the contents of the LumoraNative folder.)
-3. (Optional, to sign with your own key so it can update your old app)
-   Repo > Settings > Secrets and variables > Actions > New repository secret:
-     KEYSTORE_B64      = base64 text of lumora-signing-key.p12
-     KEYSTORE_PASSWORD = lumora
-     KEY_ALIAS         = lumora
-   Without these secrets the APK is signed with a debug key (still installs fine).
-4. Open the Actions tab > "Build APK" > wait ~5 minutes > open the run > download "Lumora-Player-apk".
-5. Unzip it and install the APK. It installs next to your old app (package com.lumora.player).
+A modern IPTV player for Android and Android TV.
 
-If the build fails, open the failed run, copy the red error lines and send them to me.
+Lumora TV provides a clean, user-friendly interface for managing IPTV playlists and watching content from your own IPTV service.
 
-Pairing: TV home > "Link phone" shows the TV ID. Phone: cast icon > type the code > Link.
+Features
 
-ANDROID v1.3.0 / TV v3.9.0
-- TV: Settings > Phone > "Pair with code" opens the link screen (code + QR).
-- Android: cast icon > switch "Play on TV when it is connected" (off = everything plays on the phone; the player still has a manual Cast button).
-- Android: "Pair with QR code" scans the QR shown on the TV (camera permission requested on first use).
-- Android: the remote is now a separate button (remote icon in the top bar, visible when a TV is linked).
+- M3U Playlists — Add and manage M3U playlists.
+- Xtream Codes API — Connect using your server URL, username, and password.
+- Modern Interface — A clean and intuitive viewing experience.
+- Content Browsing — Browse channels and content supported by your IPTV provider.
+
+Download
+
+Visit the "Releases page" (https://github.com/mejri02/LumoraphoneApp/releases) to download the latest Android APK.
+
+1. Open the latest release.
+2. Download the ".apk" file from the release assets.
+3. Install it on your Android device.
+
+If Android asks for permission to install apps from your browser, allow it to continue.
+
+Requirements
+
+- A compatible Android device.
+- An IPTV playlist or subscription supported by the application.
+
+Disclaimer
+
+Lumora TV is an IPTV player. It does not provide, host, or distribute TV channels, movies, or subscriptions. Users are responsible for the content and services they access through the application.
+
+Support
+
+If you encounter a problem, please report it through the repository's "Issues" (https://github.com/mejri02/LumoraphoneApp/issues) page.
+
+---
+
+Lumora TV 1.5.0
