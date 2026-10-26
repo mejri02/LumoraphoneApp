@@ -1,0 +1,23 @@
+CHANGES (new UI, phone app)
+- phone-app-source/index.html replaced with a standalone new UI (Arabic/English, RTL/LTR).
+- Bottom nav: Home, Catalog, +, Favorites, Search. Settings via gear icon.
+- Login validates the Xtream account and shows an error code, message and fix for each failure (E_EMPTY, E_URL, E_NET, E_TIMEOUT, E_HTTP, E_FORMAT, E_AUTH, E_INACTIVE, E_EXPIRED).
+- Multiple accounts, switch/edit/delete, startup account check, connection warning.
+- Per-account favorites, search across live/movies/series, HLS playback, series episodes.
+- Android (Kotlin) sources and tv-app-source are unchanged.
+- The old phone app files (js/, css/) are still present but no longer used by index.html.
+
+ADDITIONS (v2)
+- Continue watching with saved positions and progress bars (movies and episodes).
+- Playback speed control (0.5x to 2x) and keyboard shortcuts (Space, Arrow keys, Esc).
+- Category sorting: by item count or A-Z.
+- Adult-category lock with a 4-digit PIN (session unlock).
+- Expiry warning 7 days before subscription end.
+- Export and import of a JSON backup (contains passwords, keep it private).
+
+ADDITIONS (v3)
+- Automatic retry with backoff on network timeouts and server 5xx errors.
+- HLS stream auto-recovery after network or media errors.
+- Now/Next program info for live channels (from the provider's EPG).
+- Picture-in-picture and fullscreen buttons; F for fullscreen, M to mute.
+- Sleep timer (15, 30, 60 minutes or off).
