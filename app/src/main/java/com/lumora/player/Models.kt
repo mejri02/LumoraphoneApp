@@ -35,19 +35,21 @@ data class Item(
     val url: String = "",
     val srcId: String = "",
     val season: Int = 0,
-    val num: Int = 0
+    val num: Int = 0,
+    val added: Long = 0L,
+    val rating: Double = 0.0
 ) {
     val key: String get() = "$srcId|$kind|$id"
 
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("group", group)
         .put("logo", logo).put("kind", kind).put("ext", ext).put("url", url).put("srcId", srcId)
-        .put("season", season).put("num", num)
+        .put("season", season).put("num", num).put("added", added).put("rating", rating)
 
     companion object {
         fun from(o: JSONObject) = Item(
             o.optString("id"), o.optString("name"), o.optString("group"), o.optString("logo"),
             o.optString("kind", "live"), o.optString("ext"), o.optString("url"), o.optString("srcId"),
-            o.optInt("season"), o.optInt("num")
+            o.optInt("season"), o.optInt("num"), o.optLong("added"), o.optDouble("rating", 0.0)
         )
     }
 }
@@ -62,6 +64,7 @@ object Store {
     private lateinit var sp: SharedPreferences
 
     fun init(c: Context) {
+        if (::sp.isInitialized) return
         sp = c.getSharedPreferences("lumora", Context.MODE_PRIVATE)
     }
 
@@ -164,5 +167,10 @@ object Store {
     fun getString(k: String, d: String = ""): String = sp.getString(k, d) ?: d
     fun putString(k: String, v: String) {
         sp.edit().putString(k, v).apply()
+    }
+
+    /** Synchronous write, so the value is on disk when this returns (used for pairing data). */
+    fun putStringNow(k: String, v: String) {
+        sp.edit().putString(k, v).commit()
     }
 }

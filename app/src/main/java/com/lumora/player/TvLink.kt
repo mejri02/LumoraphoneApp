@@ -1,5 +1,7 @@
 package com.lumora.player
 
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +17,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.thread
 import kotlin.concurrent.withLock
@@ -32,11 +35,12 @@ object TvLink {
     private class Q(val seq: Long, val msg: JSONObject, val at: Long)
 
     const val PORT = 8765
+    private const val ONLINE_MS = 45000L
 
     val version = mutableIntStateOf(0)
 
     private val tvs = java.util.concurrent.CopyOnWriteArrayList<Tv>()
-    private var active = ""
+    @Volatile private var active = ""
     private val seen = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val status = java.util.concurrent.ConcurrentHashMap<String, JSONObject>()
     private val queues = HashMap<String, MutableList<Q>>()
@@ -45,37 +49,59 @@ object TvLink {
     private val epoch = System.currentTimeMillis().toString(36)
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
-    private var server: ServerSocket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val main = Handler(Looper.getMainLooper())
+    private val loaded = AtomicBoolean(false)
+    private val serving = AtomicBoolean(false)
+    private val ticking = AtomicBoolean(false)
 
+    /** Safe to call many times (activity recreation, process restore, resume). */
     fun init() {
+        if (loaded.compareAndSet(false, true)) load()
+        startServer()
+        if (ticking.compareAndSet(false, true)) {
+            scope.launch {
+                while (isActive) {
+                    delay(5000)
+                    emit()
+                }
+            }
+        }
+        ping(null)
+    }
+
+    /** Called every time the app comes to the foreground. */
+    fun resume() {
+        init()
+        emit()
+    }
+
+    private fun load() {
         try {
             val o = JSONObject(Store.getString("pair", "{}"))
             val a = o.optJSONArray("tvs") ?: JSONArray()
-            for (i in 0 until a.length()) {
-                val t = a.getJSONObject(i)
-                tvs.add(Tv(t.getString("id"), t.optString("name", "TV")))
+            lock.withLock {
+                tvs.clear()
+                for (i in 0 until a.length()) {
+                    val t = a.optJSONObject(i) ?: continue
+                    val id = t.optString("id")
+                    if (id.isNotEmpty() && tvs.none { it.id == id }) tvs.add(Tv(id, t.optString("name", "TV")))
+                }
+                val want = o.optString("active")
+                active = if (tvs.any { it.id == want }) want else tvs.firstOrNull()?.id ?: ""
             }
-            active = o.optString("active")
         } catch (_: Exception) {
-        }
-        startServer()
-        scope.launch {
-            while (isActive) {
-                delay(5000)
-                emit()
-            }
         }
     }
 
     private fun save() {
         val a = JSONArray()
         tvs.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name)) }
-        Store.putString("pair", JSONObject().put("tvs", a).put("active", active).toString())
+        Store.putStringNow("pair", JSONObject().put("tvs", a).put("active", active).toString())
     }
 
     private fun emit() {
-        version.intValue = version.intValue + 1
+        main.post { version.intValue = version.intValue + 1 }
     }
 
     fun fmt(id: String): String = id.chunked(4).joinToString("-")
@@ -90,7 +116,7 @@ object TvLink {
         return if (s.length in 8..40) s else ""
     }
 
-    private fun isOnline(id: String) = System.currentTimeMillis() - (seen[id] ?: 0L) < 45000
+    private fun isOnline(id: String) = System.currentTimeMillis() - (seen[id] ?: 0L) < ONLINE_MS
 
     fun list(): List<TvView> = tvs.map {
         val s = status[it.id]
@@ -128,7 +154,8 @@ object TvLink {
 
     fun send(op: String, data: JSONObject? = null, onDone: (Boolean) -> Unit = {}) {
         if (active.isEmpty()) {
-            onDone(false); return
+            onDone(false)
+            return
         }
         sendTo(active, op, data, onDone)
     }
@@ -147,24 +174,44 @@ object TvLink {
             if (i < 0) tvs.add(Tv(id, nm)) else if (name.isNotBlank()) tvs[i] = Tv(id, nm)
             active = id
         }
-        save(); ping(id); emit()
+        save()
+        ping(id)
+        emit()
         return id
     }
 
-    /** Sends hello and waits for the TV to pick it up on the local network. Returns "ok" or "tv" (no answer from TV). */
-    suspend fun verify(id: String, ms: Long = 15000): String {
+    /**
+     * Sends hello and waits for the TV to answer on the local network.
+     * Returns "ok" when the TV answered, "tv" when it did not answer in time.
+     */
+    suspend fun verify(id: String, ms: Long = 12000): String {
+        if (isOnline(id)) return "ok"
         val t0 = System.currentTimeMillis()
         enqueue(id, mk("hello", JSONObject().put("device", "phone").put("name", "Lumora Phone")))
         while (System.currentTimeMillis() - t0 < ms) {
             if ((seen[id] ?: 0L) >= t0) return "ok"
-            delay(300)
+            delay(200)
         }
         return "tv"
     }
 
+    /**
+     * Makes sure the TV is reachable (waiting up to [ms] for it if needed) and then queues [op].
+     * Returns false when the TV did not answer, so nothing is queued and the TV will not start unexpectedly later.
+     */
+    suspend fun sendWhenReachable(op: String, data: JSONObject? = null, ms: Long = 4000): Boolean {
+        if (active.isEmpty()) return false
+        if (!isOnline(active) && verify(active, ms) != "ok") return false
+        sendTo(active, op, data)
+        return true
+    }
+
     fun select(id: String) {
         if (tvs.none { it.id == id }) return
-        active = id; save(); ping(id); emit()
+        active = id
+        save()
+        ping(id)
+        emit()
     }
 
     fun remove(id: String) {
@@ -172,32 +219,40 @@ object TvLink {
         lock.withLock {
             tvs.removeAll { it.id == id }
             if (active == id) active = ""
-            seen.remove(id); status.remove(id)
+            seen.remove(id)
+            status.remove(id)
         }
-        save(); emit()
+        save()
+        emit()
     }
 
     /* ---------- local HTTP server ---------- */
 
     private fun startServer() {
-        if (server != null) return
+        if (!serving.compareAndSet(false, true)) return
         thread(isDaemon = true, name = "lumora-lan") {
             while (true) {
                 try {
                     val ss = ServerSocket()
                     ss.reuseAddress = true
                     ss.bind(InetSocketAddress(PORT))
-                    server = ss
                     while (true) {
                         val s = ss.accept()
                         thread(isDaemon = true, name = "lumora-lan-conn") {
-                            try { handle(s) } catch (_: Exception) { } finally { try { s.close() } catch (_: Exception) { } }
+                            try {
+                                handle(s)
+                            } catch (_: Exception) {
+                            } finally {
+                                try { s.close() } catch (_: Exception) { }
+                            }
                         }
                     }
                 } catch (_: Exception) {
                 }
-                server = null
-                try { Thread.sleep(3000) } catch (_: InterruptedException) { }
+                try {
+                    Thread.sleep(2000)
+                } catch (_: InterruptedException) {
+                }
             }
         }
     }
@@ -281,7 +336,11 @@ object TvLink {
     }
 
     private fun onTvMessage(id: String, text: String) {
-        if (text.isBlank()) { seen[id] = System.currentTimeMillis(); emit(); return }
+        if (text.isBlank()) {
+            seen[id] = System.currentTimeMillis()
+            emit()
+            return
+        }
         try {
             val m = JSONObject(text)
             if (m.optInt("lumora") != 1) return
