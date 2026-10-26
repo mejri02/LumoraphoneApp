@@ -26,18 +26,27 @@ object Xtream {
     suspend fun login(s: Source) {
         if (s.url.isBlank()) throw IOException("Enter the server URL")
         if (s.user.isBlank() || s.pass.isBlank()) throw IOException("Enter username and password")
-        val txt = Net.text(api(s), 30)
+        val txt = try {
+            Net.text(api(s), 30)
+        } catch (e: IOException) {
+            if (e.message == "Network error") throw IOException("Cannot reach the server. Check the URL and your internet connection.")
+            throw e
+        }
+        val notXtream = "Not an Xtream server. Check the URL, for example http://host:port"
         val o = try {
             JSONObject(txt.trim())
         } catch (e: Exception) {
-            throw IOException("Invalid response from server")
+            throw IOException(notXtream)
         }
-        val ui = o.optJSONObject("user_info") ?: throw IOException("Invalid response from server")
-        if (ui.optString("auth") != "1") throw IOException("Invalid username or password")
+        val ui = o.optJSONObject("user_info") ?: throw IOException(notXtream)
+        if (ui.optString("auth") != "1") throw IOException("Wrong username or password")
         val st = ui.optString("status")
-        if (st.isNotEmpty() && st != "Active") throw IOException("Account status: $st")
+        if (st.isNotEmpty() && st != "Active") throw IOException("Account is not active (status: $st)")
         val exp = ui.optString("exp_date").toLongOrNull() ?: 0L
-        if (exp > 0 && exp * 1000 < System.currentTimeMillis()) throw IOException("Account expired")
+        if (exp > 0 && exp * 1000 < System.currentTimeMillis()) {
+            val d = java.text.DateFormat.getDateInstance().format(java.util.Date(exp * 1000))
+            throw IOException("Subscription expired on $d")
+        }
     }
 
     suspend fun catalog(s: Source, kind: String): List<Item> {

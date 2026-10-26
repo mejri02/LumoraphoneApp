@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Switch
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.text.KeyboardOptions
@@ -99,8 +100,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = Color(0xFFE5173F), background = Color(0xFF0B0B0F), surface = Color(0xFF16161C),
-                    onSurface = Color.White, onBackground = Color.White, surfaceVariant = Color(0xFF1C1C22)
+                    primary = Color(vm.accentInt()), onPrimary = Color.White, secondary = Color(vm.accentInt()), background = Color(0xFF090B11), surface = Color(0xFF131722),
+                    onSurface = Color(0xFFEDEFF5), onBackground = Color(0xFFEDEFF5), surfaceVariant = Color(0xFF1B2030)
                 )
             ) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Root(vm) }
@@ -124,6 +125,15 @@ fun Root(vm: AppVM) {
     var tab by remember { mutableStateOf(0) }
     var castSheet by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<Source?>(null) }
+    BackHandler(enabled = vm.playing == null && (vm.showSettings || vm.seriesOpen != null || castSheet || form != null || tab != 0)) {
+        when {
+            form != null -> { form = null }
+            castSheet -> { castSheet = false }
+            vm.seriesOpen != null -> { vm.seriesOpen = null }
+            vm.showSettings -> { vm.showSettings = false }
+            else -> { tab = 0 }
+        }
+    }
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) {
         if (vm.message.isNotEmpty()) {
@@ -329,6 +339,21 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             }
             item { SettingHeader("Playback") }
             item { SwitchRow("Resume where I stopped", vm.resumeOn) { v -> vm.setResume(v) } }
+            item { SettingHeader("Appearance") }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Accent color", Modifier.weight(1f))
+                    vm.accents.forEachIndexed { i, c ->
+                        Box(
+                            Modifier.padding(start = 8.dp).size(if (i == vm.accentIdx) 30.dp else 24.dp)
+                                .clip(CircleShape).background(Color(c)).clickable { vm.changeAccent(i) }
+                        )
+                    }
+                }
+            }
+            item { SettingHeader("Downloads (offline)") }
+            if (vm.downloads.isEmpty()) item { Text("No downloads yet. Tap the download icon on a movie or episode.", color = Color.Gray, fontSize = 13.sp) }
+            items(vm.downloads.toList()) { d -> DownloadRow(vm, d) }
             item { SettingHeader("Parental control") }
             item {
                 ActionRow(
@@ -340,10 +365,25 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             item { ActionRow("Clear continue watching", "Removes saved progress") { vm.clearProgress() } }
             item { ActionRow("Clear favorites", "Removes all favorites") { vm.clearFavs() } }
             item { SettingHeader("About") }
-            item { Text("Lumora 1.1.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
+            item { Text("Lumora 1.2.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
         }
     }
     if (pinDialog) PinDialog(vm) { pinDialog = false }
+}
+
+@Composable
+fun DownloadRow(vm: AppVM, d: Download) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(d.item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(vm.downloadState(d), fontSize = 12.sp, color = Color.Gray)
+        }
+        IconButton(onClick = { vm.playOffline(d) }) { Icon(Icons.Default.PlayArrow, "Play") }
+        IconButton(onClick = { vm.deleteDownload(d) }) { Icon(Icons.Default.Delete, "Delete") }
+    }
 }
 
 @Composable
@@ -453,7 +493,14 @@ fun SourceForm(vm: AppVM, start: Source, close: () -> Unit) {
                     testing = true; result = ""
                     vm.test(build()) { err -> testing = false; result = err ?: "Connection OK" }
                 }) { Text("Test") }
-                Button(onClick = { vm.saveSource(build()); close() }) { Text("Save") }
+                Button(enabled = !testing, onClick = {
+                    testing = true; result = ""
+                    val cand = build()
+                    vm.test(cand) { err ->
+                        testing = false
+                        if (err == null) { vm.saveSource(cand); close() } else { result = err }
+                    }
+                }) { Text(if (type == "xtream") "Login" else "Save") }
             }
         },
         dismissButton = {
@@ -471,6 +518,7 @@ fun CatalogTab(vm: AppVM) {
     var k by remember { mutableStateOf(0) }
     var group by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf<String?>(null) }
+    var gq by remember { mutableStateOf("") }
     val kind = kinds[k].first
     LaunchedEffect(kind, vm.activeSrc) { vm.load(kind) }
     val items = vm.catalog[kind] ?: emptyList()
@@ -479,18 +527,26 @@ fun CatalogTab(vm: AppVM) {
         if (vm.sort == "az") counts.keys.sortedBy { g -> g.lowercase() }
         else counts.entries.sortedByDescending { e -> e.value }.map { e -> e.key }
     }
+    val shown = groups.filter { g -> g.contains(gq.trim(), ignoreCase = true) }
     Column(Modifier.fillMaxSize()) {
-        TabRow(k) { kinds.forEachIndexed { i, p -> Tab(k == i, { k = i; group = null }, text = { Text(p.second) }) } }
+        TabRow(k) { kinds.forEachIndexed { i, p -> Tab(k == i, { k = i; group = null; gq = "" }, text = { Text(p.second) }) } }
         if (vm.loading[kind] == true) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else if (vm.src() == null) Text("No sources yet", Modifier.padding(24.dp), color = Color.Gray)
         else {
-            if (groups.size > 1) LazyRow(
-                Modifier.padding(vertical = 6.dp),
+            OutlinedTextField(
+                value = gq,
+                onValueChange = { v -> gq = v },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                placeholder = { Text("Search categories") }
+            )
+            if (shown.isNotEmpty()) LazyRow(
+                Modifier.padding(bottom = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)
             ) {
                 item { FilterChip(group == null, { group = null }, { Text("All") }) }
-                items(groups) { g ->
+                items(shown) { g ->
                     FilterChip(group == g, { if (vm.locked(g)) { pending = g } else { group = g } }, { Text(g, maxLines = 1) })
                 }
             }
@@ -521,6 +577,7 @@ fun ItemList(vm: AppVM, list: List<Item>) {
                     Text(it.name, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 15.sp)
                     Text(it.group, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = Color.Gray)
                 }
+                if (it.kind == "vod") IconButton(onClick = { vm.download(it) }) { Icon(Icons.Default.Download, "Download") }
                 if (it.kind != "series") IconButton(onClick = { vm.playHere(it) }) { Icon(Icons.Default.PlayArrow, "Play on phone") }
                 IconButton(onClick = { vm.toggleFav(it) }) { Icon(if (vm.isFav(it)) Icons.Default.Star else Icons.Default.StarBorder, "Favorite", tint = if (vm.isFav(it)) Color(0xFFFBBF24) else Color.Gray) }
             }
@@ -559,7 +616,8 @@ fun SeriesDialog(vm: AppVM, serie: Item) {
                         }
                     }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("S${e.season}E${e.num}", Modifier.width(64.dp), color = Color.Gray, fontSize = 12.sp)
-                        Text(e.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(e.name, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        IconButton(onClick = { vm.download(e.copy(name = serie.name + " · " + e.name)) }) { Icon(Icons.Default.Download, "Download") }
                     }
                 }
             }

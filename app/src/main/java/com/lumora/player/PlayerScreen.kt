@@ -75,7 +75,7 @@ fun PlayerScreen(vm: AppVM, req: PlayReq) {
     var speed by remember { mutableStateOf(1f) }
 
     val exo = remember(req.url) {
-        val ds = OkHttpDataSource.Factory(Net.client).setUserAgent(Net.UA)
+        val ds = androidx.media3.datasource.DefaultDataSource.Factory(ctx, OkHttpDataSource.Factory(Net.client).setUserAgent(Net.UA))
         ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ds)).build().apply {
             setMediaItem(MediaItem.fromUri(req.url))
             playWhenReady = true

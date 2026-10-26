@@ -56,6 +56,8 @@ data class Progress(val item: Item, val pos: Long, val dur: Long, val ts: Long)
 
 data class Viewed(val item: Item, val count: Int)
 
+data class Download(val item: Item, val downloadId: Long)
+
 object Store {
     private lateinit var sp: SharedPreferences
 
@@ -133,6 +135,25 @@ object Store {
         val a = JSONArray()
         l.forEach { a.put(JSONObject().put("item", it.item.toJson()).put("count", it.count)) }
         sp.edit().putString("views", a.toString()).apply()
+    }
+
+    fun downloads(): MutableList<Download> {
+        val out = mutableListOf<Download>()
+        val a = arr("downloads")
+        for (i in 0 until a.length()) {
+            try {
+                val o = a.getJSONObject(i)
+                out.add(Download(Item.from(o.getJSONObject("item")), o.optLong("id")))
+            } catch (_: Exception) {
+            }
+        }
+        return out
+    }
+
+    fun saveDownloads(l: List<Download>) {
+        val a = JSONArray()
+        l.forEach { a.put(JSONObject().put("item", it.item.toJson()).put("id", it.downloadId)) }
+        sp.edit().putString("downloads", a.toString()).apply()
     }
 
     fun getBool(k: String, d: Boolean): Boolean = sp.getBoolean(k, d)

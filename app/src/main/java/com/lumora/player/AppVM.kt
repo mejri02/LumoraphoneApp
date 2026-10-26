@@ -1,11 +1,16 @@
 package com.lumora.player
 
+import android.app.Application
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -16,13 +21,16 @@ val ADULT = Regex("xxx|adult|\\+18|18\\+|للكبار", RegexOption.IGNORE_CASE)
 
 fun AppVM.locked(group: String): Boolean = pin.isNotEmpty() && !unlocked && ADULT.containsMatchIn(group)
 
-class AppVM : ViewModel() {
+class AppVM(app: Application) : AndroidViewModel(app) {
     val sources = mutableStateListOf<Source>()
     val favs = mutableStateListOf<Item>()
     val progress = mutableStateListOf<Progress>()
     val viewed = mutableStateListOf<Viewed>()
+    val downloads = mutableStateListOf<Download>()
     val catalog = mutableStateMapOf<String, List<Item>>()
     val loading = mutableStateMapOf<String, Boolean>()
+
+    val accents: List<Int> = listOf(0xFFE5173F.toInt(), 0xFF8B5CF6.toInt(), 0xFF3B82F6.toInt(), 0xFF10B981.toInt())
 
     var activeSrc by mutableStateOf("")
     var message by mutableStateOf("")
@@ -35,12 +43,14 @@ class AppVM : ViewModel() {
     var resumeOn by mutableStateOf(Store.getBool("resume", true))
     var pin by mutableStateOf(Store.getString("pin", ""))
     var unlocked by mutableStateOf(false)
+    var accentIdx by mutableStateOf(Store.getString("accent", "0").toIntOrNull() ?: 0)
 
     init {
         sources.addAll(Store.sources())
         favs.addAll(Store.favs())
         progress.addAll(Store.progress())
         viewed.addAll(Store.views())
+        downloads.addAll(Store.downloads())
         activeSrc = Store.getString("activeSrc").ifEmpty { sources.firstOrNull()?.id ?: "" }
     }
 
@@ -48,6 +58,9 @@ class AppVM : ViewModel() {
     fun srcOf(id: String): Source? = sources.firstOrNull { it.id == id }
 
     fun toast(m: String) { message = m }
+
+    fun accentInt(): Int = accents[accentIdx.coerceIn(0, accents.size - 1)]
+    fun changeAccent(i: Int) { accentIdx = i; Store.putString("accent", i.toString()) }
 
     fun selectSource(id: String) {
         activeSrc = id
@@ -73,11 +86,11 @@ class AppVM : ViewModel() {
             try {
                 if (s.type == "xtream") Xtream.login(s) else {
                     val t = Net.text(s.url.trim(), 60)
-                    if (!t.contains("#EXTM3U") && !t.contains("#EXTINF")) throw java.io.IOException("Invalid response from server")
+                    if (!t.contains("#EXTM3U") && !t.contains("#EXTINF")) throw java.io.IOException("Not a valid M3U playlist")
                 }
                 done(null)
             } catch (e: Exception) {
-                done(e.message ?: "Network error")
+                done(e.message ?: "Unknown error")
             }
         }
     }
@@ -165,10 +178,58 @@ class AppVM : ViewModel() {
 
     fun mostViewed(): List<Viewed> = viewed.sortedByDescending { v -> v.count }.take(12)
 
+    // ---------- offline downloads ----------
+    private val dm: DownloadManager
+        get() = getApplication<Application>().getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+
+    fun download(item: Item) {
+        val s = srcOf(item.srcId) ?: src() ?: return
+        if (downloads.any { d -> d.item.key == item.key }) { message = "Already downloaded"; return }
+        val app = getApplication<Application>()
+        val ext = item.ext.ifBlank { "mp4" }
+        val base = item.name.replace(Regex("[^A-Za-z0-9._-]+"), "_").trim('_').take(60).ifBlank { "video" }
+        val req = DownloadManager.Request(Uri.parse(Xtream.resolve(s, item)))
+            .setTitle(item.name)
+            .setDescription("Lumora")
+            .addRequestHeader("User-Agent", Net.UA)
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalFilesDir(app, Environment.DIRECTORY_MOVIES, base + "_" + item.id + "." + ext)
+        val id = dm.enqueue(req)
+        downloads.add(0, Download(item, id))
+        Store.saveDownloads(downloads)
+        message = "Download started"
+    }
+
+    fun downloadState(d: Download): String {
+        dm.query(DownloadManager.Query().setFilterById(d.downloadId)).use { cur ->
+            if (cur.moveToFirst()) {
+                val st = cur.getInt(cur.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                return when (st) {
+                    DownloadManager.STATUS_SUCCESSFUL -> "Ready offline"
+                    DownloadManager.STATUS_FAILED -> "Failed"
+                    else -> "Downloading…"
+                }
+            }
+        }
+        return "Removed"
+    }
+
+    fun playOffline(d: Download) {
+        val uri = dm.getUriForDownloadedFile(d.downloadId)
+        if (uri == null) { message = "Not downloaded yet"; return }
+        playing = PlayReq(uri.toString(), d.item.name, d.item.kind, d.item, srcOf(d.item.srcId))
+    }
+
+    fun deleteDownload(d: Download) {
+        dm.remove(d.downloadId)
+        downloads.removeAll { x -> x.item.key == d.item.key }
+        Store.saveDownloads(downloads)
+    }
+
     // ---------- settings ----------
     fun changeSort(v: String) { sort = v; Store.putString("sort", v) }
-    fun setResume(v: Boolean) { resumeOn = v; Store.putBool("resume", v) }
     fun changePin(v: String) { pin = v; unlocked = false; Store.putString("pin", v) }
+    fun setResume(v: Boolean) { resumeOn = v; Store.putBool("resume", v) }
     fun clearFavs() { favs.clear(); Store.saveFavs(favs) }
 
     fun cast(p: PlayReq, startSec: Long, closePlayer: Boolean) {
