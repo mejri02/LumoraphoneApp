@@ -664,8 +664,7 @@ fun CastSheet(vm: AppVM, close: () -> Unit) {
             vm.toast(
                 when (TvLink.verify(id)) {
                     "ok" -> "TV connected ✓"
-                    "relay" -> "Could not reach the relay server. Check the phone's internet."
-                    else -> "TV did not answer. Make sure the TV app is open on the link screen and has internet."
+                    else -> "TV did not answer. Make sure the TV app is open on the link screen and that the phone and TV are on the same Wi-Fi."
                 }
             )
         }

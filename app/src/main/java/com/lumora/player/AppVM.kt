@@ -250,7 +250,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         if (startSec > 0) data.put("start", startSec)
         message = "Connecting…"
         TvLink.send("cast", data) { ok ->
-            message = if (ok) "Sent to TV" else "Could not reach the relay"
+            message = if (ok) "Sent to TV" else "Could not reach the TV (same Wi-Fi?)"
             if (ok && closePlayer) playing = null
         }
     }
@@ -259,7 +259,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val m = JSONObject().put("type", s.type).put("url", s.url).put("user", s.user).put("pass", s.pass)
             .put("name", s.name).put("format", s.format)
         TvLink.send("source", JSONObject().put("source", m)) { ok ->
-            message = if (ok) "Source sent to TV" else "Could not reach the relay"
+            message = if (ok) "Source sent to TV" else "Could not reach the TV (same Wi-Fi?)"
         }
     }
 }

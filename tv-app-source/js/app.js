@@ -3494,7 +3494,9 @@
         up: 38, down: 40, left: 37, right: 39, ok: 13, back: 10009, info: 457, stop: 413, playpause: 10252,
         rw: 412, ff: 417, chup: 427, chdown: 428, red: 403, green: 404, yellow: 405, blue: 406
     };
-    var link = { id: '', topic: '', es: null, up: false, phoneAt: 0, phoneName: '', seen: {}, nSeen: 0, lastT: 0, hb: null, rt: null, pt: null, lastSend: 0, sendT: null, open: false, tok: 0, fresh: false };
+    var LAN_PORT = 8765;
+    var CANDS_KEY = 'lumora.phoneips';
+    var link = { id: '', host: '', cands: [], epoch: '', ack: 0, fails: 0, backoff: 4000, up: false, phoneAt: 0, phoneName: '', myIp: '', hb: null, rt: null, lastSend: 0, sendT: null, open: false, tok: 0, fresh: false };
 
     function newTvId() {
         var out = '';
@@ -3508,6 +3510,8 @@
         return out.replace(/(.{4})(?=.)/g, '$1-');
     }
 
+    function linkRawId() { return link.id.replace(/-/g, ''); }
+
     function linkInit() {
         var id = '';
         try { id = localStorage.getItem(LINK_KEY) || ''; } catch (e) { }
@@ -3517,7 +3521,10 @@
             try { localStorage.setItem(LINK_KEY, id); } catch (e2) { }
         }
         link.id = id;
-        link.topic = 'lumora-' + id.replace(/-/g, '');
+        link.host = '';
+        link.ack = 0;
+        link.epoch = '';
+        try { link.cands = JSON.parse(localStorage.getItem(CANDS_KEY) || '[]') || []; } catch (e3) { link.cands = []; }
         linkListen();
         clearInterval(link.hb);
         link.hb = setInterval(function () {
@@ -3531,70 +3538,194 @@
         link.tok++;
         link.up = false;
         clearTimeout(link.rt);
-        clearTimeout(link.pt);
-        if (link.es) { try { link.es.close(); } catch (e) { } link.es = null; }
+    }
+
+    /* ---------- local network transport (phone hosts a tiny HTTP server, TV finds it on the same Wi-Fi) ---------- */
+    function lanReq(method, url, body, timeout, cb) {
+        var x = new XMLHttpRequest();
+        var done = false;
+        var tm = null;
+        function fin(ok, text) {
+            if (done) return;
+            done = true;
+            clearTimeout(tm);
+            cb(ok, text);
+        }
+        tm = setTimeout(function () { try { x.abort(); } catch (e) { } fin(false, ''); }, timeout);
+        x.onload = function () { fin(x.status >= 200 && x.status < 300, x.responseText); };
+        x.onerror = function () { fin(false, ''); };
+        x.onabort = function () { fin(false, ''); };
+        try {
+            x.open(method, url, true);
+            if (body) x.setRequestHeader('Content-Type', 'text/plain');
+            x.send(body || null);
+        } catch (e2) { fin(false, ''); }
+    }
+
+    function lanMyIp(cb) {
+        var ip = '';
+        try {
+            if (window.webapis && webapis.network && webapis.network.getIp) ip = String(webapis.network.getIp() || '');
+        } catch (e) { ip = ''; }
+        if (/^\d+\.\d+\.\d+\.\d+$/.test(ip) && ip !== '0.0.0.0') { cb(ip); return; }
+        var Pc = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+        if (!Pc) { cb(''); return; }
+        var got = false;
+        var pc = null;
+        function fin(v) { if (got) return; got = true; try { pc.close(); } catch (e1) { } cb(v); }
+        try {
+            pc = new Pc({ iceServers: [] });
+            pc.createDataChannel('x');
+            pc.onicecandidate = function (ev) {
+                if (!ev || !ev.candidate) return;
+                var m = /(\d+\.\d+\.\d+\.\d+)/.exec(ev.candidate.candidate || '');
+                if (m && !/^(0\.|127\.|169\.254\.)/.test(m[1])) fin(m[1]);
+            };
+            var off = pc.createOffer();
+            if (off && off.then) off.then(function (o) { return pc.setLocalDescription(o); })['catch'](function () { });
+            setTimeout(function () { fin(''); }, 1500);
+        } catch (e2) { fin(''); }
+    }
+
+    function lanProbe(ips, tok, cb) {
+        var idx = 0, active = 0, found = [], finished = false;
+        var q = encodeURIComponent(linkRawId());
+        function finish() { if (finished) return; finished = true; cb(found); }
+        function pump() {
+            if (finished) return;
+            if (tok !== link.tok) { finished = true; return; }
+            while (active < 24 && idx < ips.length) {
+                (function (ip) {
+                    active++;
+                    lanReq('GET', 'http://' + ip + ':' + LAN_PORT + '/lumora/ping?tv=' + q, null, 1500, function (ok, text) {
+                        active--;
+                        if (ok) {
+                            var o = null;
+                            try { o = JSON.parse(text); } catch (e) { }
+                            if (o && o.lumora && o.phone) {
+                                found.push({ ip: ip, known: !!o.known });
+                                if (o.known) { finish(); return; }
+                            }
+                        }
+                        pump();
+                    });
+                })(ips[idx++]);
+            }
+            if (active === 0 && idx >= ips.length) finish();
+        }
+        if (!ips.length) { finish(); return; }
+        pump();
+    }
+
+    function saveCands(list) {
+        link.cands = list.slice(0, 6);
+        try { localStorage.setItem(CANDS_KEY, JSON.stringify(link.cands)); } catch (e) { }
+    }
+
+    function linkFound(tok, found) {
+        if (tok !== link.tok) return;
+        var known = null;
+        for (var i = 0; i < found.length; i++) if (found[i].known) { known = found[i]; break; }
+        if (known) {
+            link.host = known.ip;
+            link.fails = 0;
+            link.backoff = 4000;
+            saveCands([known.ip]);
+            linkSync(tok);
+            return;
+        }
+        if (found.length) {
+            saveCands(found.map(function (f) { return f.ip; }));
+            link.rt = setTimeout(function () { linkFind(tok, true); }, 1500);
+            return;
+        }
+        link.backoff = Math.min(15000, Math.round(link.backoff * 1.5));
+        link.rt = setTimeout(function () { linkFind(tok, false); }, link.backoff);
+    }
+
+    function linkFind(tok, quickOnly) {
+        if (tok !== link.tok || link.host) return;
+        if (link.cands.length) {
+            lanProbe(link.cands.slice(), tok, function (found) {
+                if (found.length || quickOnly) { linkFound(tok, found); return; }
+                linkScan(tok);
+            });
+            return;
+        }
+        linkScan(tok);
+    }
+
+    function linkScan(tok) {
+        lanMyIp(function (ip) {
+            if (tok !== link.tok) return;
+            link.myIp = ip;
+            var prefixes = [];
+            var m = /^(\d+\.\d+\.\d+)\.\d+$/.exec(ip);
+            if (m) prefixes.push(m[1] + '.');
+            else prefixes = ['192.168.1.', '192.168.0.', '192.168.43.', '192.168.100.', '10.0.0.', '192.168.8.', '172.20.10.'];
+            var ips = [];
+            prefixes.forEach(function (p) {
+                for (var i = 1; i < 255; i++) { var h = p + i; if (h !== ip) ips.push(h); }
+            });
+            lanProbe(ips, tok, function (found) { linkFound(tok, found); });
+        });
     }
 
     function linkListen() {
         linkStop();
         var tok = link.tok;
-        var since = link.lastT || '3m';
-        if (typeof EventSource === 'undefined') { linkPoll(tok); return; }
-        var es;
-        try { es = new EventSource(CFG.RELAY + link.topic + '/sse?since=' + since); } catch (e) { linkPoll(tok); return; }
-        link.es = es;
-        es.onopen = function () { if (tok === link.tok) link.up = true; };
-        es.onmessage = function (ev) {
+        linkFind(tok, false);
+    }
+
+    function linkLost(tok) {
+        link.host = '';
+        link.up = false;
+        link.fails = 0;
+        link.rt = setTimeout(function () { linkFind(tok, false); }, 500);
+    }
+
+    function linkSync(tok) {
+        if (tok !== link.tok || !link.host) return;
+        var url = 'http://' + link.host + ':' + LAN_PORT + '/lumora/sync?tv=' + encodeURIComponent(linkRawId()) + '&ack=' + link.ack + '&ep=' + encodeURIComponent(link.epoch);
+        link.lastSend = Date.now();
+        lanReq('POST', url, JSON.stringify(linkStatus()), 15000, function (ok, text) {
             if (tok !== link.tok) return;
             var o = null;
-            try { o = JSON.parse(ev.data); } catch (e) { return; }
-            linkMsg(o);
-        };
-        es.onerror = function () {
-            if (tok !== link.tok) return;
-            link.up = false;
-            try { es.close(); } catch (e) { }
-            link.es = null;
-            clearTimeout(link.rt);
-            link.rt = setTimeout(function () { if (tok === link.tok) linkListen(); }, 5000);
-        };
-    }
-
-    function linkPoll(tok) {
-        if (tok !== link.tok) return;
-        var x = new XMLHttpRequest();
-        var since = link.lastT || '3m';
-        x.open('GET', CFG.RELAY + link.topic + '/json?poll=1&since=' + since, true);
-        x.timeout = 10000;
-        function next() { if (tok === link.tok) link.pt = setTimeout(function () { linkPoll(tok); }, 3000); }
-        x.onload = function () {
-            if (tok !== link.tok) return;
-            if (x.status >= 200 && x.status < 300) {
-                link.up = true;
-                String(x.responseText || '').split('\n').forEach(function (ln) {
-                    if (!ln) return;
-                    var o = null;
-                    try { o = JSON.parse(ln); } catch (e) { }
-                    if (o) linkMsg(o);
-                });
+            if (ok) { try { o = JSON.parse(text); } catch (e) { o = null; } }
+            if (!o) {
+                if (++link.fails >= 3) { linkLost(tok); return; }
+                link.rt = setTimeout(function () { linkSync(tok); }, 800);
+                return;
             }
-            next();
-        };
-        x.onerror = function () { link.up = false; next(); };
-        x.ontimeout = next;
-        try { x.send(); } catch (e) { next(); }
+            link.fails = 0;
+            link.up = true;
+            if (o.known === false) {
+                link.phoneAt = 0;
+                if (link.open) renderLink();
+                linkLost(tok);
+                return;
+            }
+            if (String(o.epoch || '') !== link.epoch) { link.epoch = String(o.epoch || ''); link.ack = 0; }
+            var fresh = !link.phoneAt || Date.now() - link.phoneAt > 60000;
+            link.phoneAt = Date.now();
+            link.phoneName = String(o.name || link.phoneName || 'Phone').slice(0, 40);
+            if (fresh) {
+                if (link.open) renderLink();
+                else toast(t('Phone connected'));
+                if (!link.open && state.screen === 'settings') renderSettings();
+            }
+            var msgs = o.msgs || [];
+            for (var i = 0; i < msgs.length; i++) {
+                var it = msgs[i];
+                if (!it || typeof it.seq !== 'number' || it.seq <= link.ack) continue;
+                link.ack = it.seq;
+                try { linkHandle(it.m); } catch (e2) { }
+            }
+            link.rt = setTimeout(function () { linkSync(tok); }, 50);
+        });
     }
 
-    function linkMsg(o) {
-        if (!o || o.event !== 'message' || !o.message) return;
-        if (o.id) {
-            if (link.seen[o.id]) return;
-            link.seen[o.id] = 1;
-            if (++link.nSeen > 300) { link.seen = {}; link.nSeen = 0; }
-        }
-        if (o.time && o.time > link.lastT) link.lastT = o.time;
-        var m = null;
-        try { m = JSON.parse(o.message); } catch (e) { return; }
+    function linkHandle(m) {
         if (!m || typeof m !== 'object') return;
         if (!m.lumora) {
             if (m.type && m.url) linkSource(m);
@@ -3704,12 +3835,8 @@
         var o = linkStatus();
         if (op) o.op = op;
         link.lastSend = Date.now();
-        try {
-            var x = new XMLHttpRequest();
-            x.open('POST', CFG.RELAY + link.topic + '-tv', true);
-            x.timeout = 8000;
-            x.send(JSON.stringify(o));
-        } catch (e) { }
+        if (!link.host) return;
+        lanReq('POST', 'http://' + link.host + ':' + LAN_PORT + '/lumora/status?tv=' + encodeURIComponent(linkRawId()), JSON.stringify(o), 5000, function () { });
     }
 
     function linkSoon() {
@@ -3745,7 +3872,7 @@
 
     function linkReset() {
         try { localStorage.removeItem(LINK_KEY); } catch (e) { }
-        link.lastT = 0; link.seen = {}; link.phoneAt = 0;
+        link.ack = 0; link.epoch = ''; link.host = ''; link.phoneAt = 0;
         linkInit();
         renderLink();
         toast(t('New code created'));
