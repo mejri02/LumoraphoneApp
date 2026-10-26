@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-theme="violet">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, user-scalable=no">
+    <link rel="preload" as="image" href="images/backdrop.png">
+    <title>Lumora</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script>(function(){try{var s=JSON.parse(localStorage.getItem("lumora.settings")||"{}");var l=s.lang||((navigator.language||"").toLowerCase().indexOf("ar")===0?"ar":"en");var r=document.documentElement;r.lang=l;r.dir=l==="ar"?"rtl":"ltr";}catch(e){}})();</script>
+</head>
+<body>
+    <object id="av-player" type="application/avplayer" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></object>
+    <svg width="0" height="0" style="position:absolute">
+        <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#8B5CF6"/>
+                <stop offset="1" stop-color="#06B6D4"/>
+            </linearGradient>
+            <linearGradient id="ig" gradientUnits="userSpaceOnUse" x1="6" y1="6" x2="58" y2="58">
+                <stop offset="0" stop-color="#c4b5fd"/>
+                <stop offset="1" stop-color="#67e8f9"/>
+            </linearGradient>
+        </defs>
+        <symbol id="mark" viewBox="0 0 64 64">
+            <rect width="64" height="64" rx="18" fill="url(#lg)"/>
+            <ellipse cx="32" cy="32" rx="25" ry="9" transform="rotate(-28 32 32)" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="2.4"/>
+            <path d="M26 21 L45 32 L26 43 Z" fill="#fff"/>
+        </symbol>
+        <symbol id="i-tv" viewBox="0 0 64 64">
+            <g fill="none" stroke="url(#ig)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="6" y="12" width="52" height="34" rx="7"/>
+                <path d="M22 54h20M32 46v8"/>
+                <path d="M26 21l12 8-12 8z"/>
+            </g>
+        </symbol>
+        <symbol id="i-film" viewBox="0 0 64 64">
+            <g fill="none" stroke="url(#ig)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="8" y="8" width="48" height="48" rx="9"/>
+                <path d="M8 22h48M8 42h48M22 8v48M42 8v48"/>
+            </g>
+        </symbol>
+        <symbol id="i-series" viewBox="0 0 64 64">
+            <g fill="none" stroke="url(#ig)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="6" y="22" width="42" height="32" rx="7"/>
+                <path d="M16 12h34a8 8 0 0 1 8 8v26"/>
+                <path d="M23 31l12 7-12 7z"/>
+            </g>
+        </symbol>
+        <symbol id="i-gear" viewBox="0 0 64 64">
+            <g fill="none" stroke="url(#ig)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="32" cy="32" r="10"/>
+                <path d="M32 6v10M32 48v10M6 32h10M48 32h10M13.6 13.6l7 7M43.4 43.4l7 7M50.4 13.6l-7 7M20.6 43.4l-7 7"/>
+            </g>
+        </symbol>
+        <symbol id="i-star" viewBox="0 0 64 64">
+            <g fill="none" stroke="url(#ig)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M32 7l7.6 16 17.4 2.3-12.8 12.1 3.3 17.3L32 46.2 16.5 54.7l3.3-17.3L7 25.3 24.4 23z"/>
+            </g>
+        </symbol>
+        <symbol id="i-plus" viewBox="0 0 64 64">
+            <g fill="none" stroke="url(#ig)" stroke-width="5" stroke-linecap="round">
+                <path d="M32 12v40M12 32h40"/>
+            </g>
+        </symbol>
+    </svg>
+
+    <video id="html-video" playsinline></video>
+    <div id="mini-cover"><div class="mt"></div><div class="mb"></div><div class="ml"></div><div class="mr"></div></div>
+    <div id="mini-box"></div>
+
+    <section id="home" class="screen">
+        <header class="topbar hg g36">
+            <div class="brand"><svg class="mark"><use href="#mark"/></svg><span class="word">LUMORA</span></div>
+            <div class="ctx"></div>
+            <div class="clock"></div>
+        </header>
+        <div class="content" id="home-box">
+            <div class="label" data-i18n="Your sources">Your sources</div>
+            <ul id="source-list" class="src-list"></ul>
+            <div id="home-empty" class="empty hidden"><img src="images/empty-sources.png" alt=""><div data-i18n="No sources yet. Choose “Add source” to connect an M3U playlist, an Xtream Codes account or a Stalker portal.">No sources yet. Choose “Add source” to connect an M3U playlist, an Xtream Codes account or a Stalker portal.</div></div>
+        </div>
+        <footer class="hints hg g34" data-h="home"></footer>
+    </section>
+
+    <section id="form" class="screen hidden">
+        <header class="topbar hg g36">
+            <div class="brand"><svg class="mark"><use href="#mark"/></svg><span class="word">LUMORA</span></div>
+            <div class="ctx"><div class="ctx-title" id="form-title"></div></div>
+            <div class="clock"></div>
+        </header>
+        <div class="content narrow" id="form-box">
+            <div id="form-rows"></div>
+        </div>
+        <footer class="hints hg g34" data-h="form"></footer>
+    </section>
+
+    <section id="settings" class="screen hidden">
+        <header class="topbar hg g36">
+            <div class="brand"><svg class="mark"><use href="#mark"/></svg><span class="word">LUMORA</span></div>
+            <div class="ctx"><div class="ctx-title" data-i18n="Settings">Settings</div></div>
+            <div class="clock"></div>
+        </header>
+        <div class="content wide" id="settings-box">
+            <div id="settings-list"></div>
+        </div>
+        <footer class="hints hg g34" data-h="settings"></footer>
+    </section>
+
+    <section id="hub" class="screen hidden">
+        <header class="topbar hg g36">
+            <div class="brand"><svg class="mark"><use href="#mark"/></svg><span class="word">LUMORA</span></div>
+            <div class="ctx">
+                <div class="ctx-title" id="hub-title"></div>
+                <div class="ctx-meta"><span class="badge" id="hub-type"></span></div>
+            </div>
+            <div class="clock"></div>
+        </header>
+        <div class="content center">
+            <div style="display:flex;flex-direction:column;align-items:center">
+                <ul id="hub-list" class="tiles hg g40"></ul>
+                <div id="hub-switch" class="btn" style="margin-top:44px" data-i18n="Sources menu">Sources menu</div>
+            </div>
+        </div>
+        <footer class="hints hg g34" data-h="hub"></footer>
+    </section>
+
+    <section id="browse" class="screen hidden">
+        <header class="topbar hg g36">
+            <div class="brand"><svg class="mark"><use href="#mark"/></svg><span class="word">LUMORA</span></div>
+            <div class="ctx">
+                <div class="ctx-title" id="src-title"></div>
+                <div class="ctx-meta hg g16"><span class="badge" id="src-type"></span><span id="src-count"></span></div>
+            </div>
+            <div class="clock"></div>
+        </header>
+        <div class="body">
+            <aside id="groups">
+                <div class="label" data-i18n="Categories">Categories</div>
+                <ul id="group-list"></ul>
+            </aside>
+            <main id="items">
+                <div class="items-head hg g24">
+                    <div class="label" id="channels-title"></div>
+                    <input id="search" type="text" data-i18n-ph="Search  (BLUE)" placeholder="Search  (BLUE)" autocomplete="off" spellcheck="false">
+                </div>
+                <div id="ctx-sub" class="sub hidden"></div>
+                <div id="detail" class="hidden"><div id="detail-title"></div><div id="detail-meta"></div><div id="detail-plot"></div><div id="detail-cast"></div></div>
+                <ul id="channel-list"></ul>
+            </main>
+        </div>
+        <footer class="hints hg g34" data-h="browse" id="browse-hints"></footer>
+    </section>
+
+    <div id="player-ui" class="hidden">
+        <div id="net-chip" class="hidden"></div>
+        <div id="chlist" class="hidden"><div id="chlist-title"></div><ul id="chlist-ul"></ul></div>
+        <div id="guide" class="hidden"><div id="guide-title"></div><ul id="guide-ul"></ul></div>
+        <div id="info" class="hidden hg g40">
+            <img id="info-logo" src="images/ph-logo.png" alt="">
+            <div id="info-main">
+                <div id="info-name"></div>
+                <div id="info-meta"></div>
+                <div id="info-plot"></div>
+                <div id="info-epg"></div>
+                <div id="info-hints" class="hints" data-h="player"></div>
+            </div>
+            <div id="info-right">
+                <div id="info-state">Connecting…</div>
+                <div id="info-fav"></div>
+                <div id="info-sleep"></div>
+                <div id="info-tech"></div>
+                <div id="prog-time"></div>
+            </div>
+            <div id="prog"><div id="prog-fill"></div></div>
+        </div>
+    </div>
+
+    <div id="backup" class="hidden">
+        <div class="mbox wide">
+            <div id="backup-title"></div>
+            <div id="backup-note"></div>
+            <textarea id="backup-text" spellcheck="false" autocomplete="off"></textarea>
+            <div id="backup-hint"></div>
+        </div>
+    </div>
+
+    <div id="bg-play" class="hidden"></div>
+    <div id="modal" class="hidden">
+        <div class="mbox">
+            <div id="modal-title"></div>
+            <div id="modal-name"></div>
+            <div id="modal-btns" class="hg g16"></div>
+        </div>
+    </div>
+
+    <div id="qr" class="hidden">
+        <div class="mbox">
+            <div id="qr-title" data-i18n="Add from phone">Add from phone</div>
+            <canvas id="qr-canvas" width="440" height="440"></canvas>
+            <div id="qr-url"></div>
+            <div id="qr-hint" data-i18n="Scan with your phone, fill the form, send. Waiting…">Scan with your phone, fill the form, send. Waiting…</div>
+        </div>
+    </div>
+
+    <div id="link" class="hidden">
+        <div class="mbox">
+            <div id="link-title" data-i18n="Link a phone">Link a phone</div>
+            <div id="link-id"></div>
+            <div id="link-state"></div>
+            <div id="link-hint" data-i18n="Open Lumora on your phone, tap the cast icon, choose Link with TV code and enter this code.">Open Lumora on your phone, tap the cast icon, choose Link with TV code and enter this code.</div>
+            <div id="link-keys"><span class="kc r"></span><span id="link-k1" data-i18n="New code">New code</span><span class="kc"></span><span id="link-k2" data-i18n="Close">Close</span></div>
+        </div>
+    </div>
+
+    <div id="digits" class="hidden"></div>
+    <div id="toast" class="hidden"></div>
+    <div id="loading" class="hidden"><span class="spin"></span><span id="loading-col"><span id="loading-text" data-i18n="Loading…">Loading…</span><span id="loading-sub" class="hidden"></span></span></div>
+
+    <div id="splash">
+        <svg class="mark big"><use href="#mark"/></svg>
+        <div class="word big">LUMORA</div>
+    </div>
+
+    <script src="$WEB_API_ROOT/webapis/webapis.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/i18n.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/net.js"></script>
+    <script src="js/m3u.js"></script>
+    <script src="js/xtream.js"></script>
+    <script src="js/stalker.js"></script>
+    <script src="js/tmdb.js"></script>
+    <script src="js/qr.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

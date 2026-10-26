@@ -1,5 +1,5 @@
-build/
-.gradle/
-local.properties
-*.iml
-.idea/
+*.p12
+*.keystore
+*.jks
+*.apk
+*.wgt
