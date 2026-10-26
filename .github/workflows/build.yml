@@ -1,49 +1,31 @@
-name: Build Lumora Phone APK
-
+name: Build APK
 on:
   push:
-    branches: [main]
   workflow_dispatch:
-
 jobs:
   build:
-    runs-on: ubuntu-24.04
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          node-version: '20'
-
-      - name: Prepare phone app
+          gradle-version: 8.7
+      - name: Restore signing key (optional)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
-          mkdir -p www
-          cp -r phone-app-source/. www/
-          npm install
-
-      - name: Generate Android project
-        run: |
-          npx cap add android
-          npx cap sync android
-
-      - name: Build APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+          if [ -n "$KEYSTORE_B64" ]; then echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/lumora.p12"; echo "KEYSTORE_FILE=$RUNNER_TEMP/lumora.p12" >> $GITHUB_ENV; fi
+      - name: Build
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: gradle assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
         with:
-          name: Lumora-Phone-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          name: Lumora-Player-apk
+          path: app/build/outputs/apk/release/*.apk

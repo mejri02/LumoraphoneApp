@@ -3,3 +3,8 @@
 *.jks
 *.apk
 *.wgt
+
+# Android build files
+.gradle/
+**/build/
+local.properties
