@@ -651,54 +651,74 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     private suspend fun runDownload(d: Download, url: String, file: File) {
         val key = d.item.key
-        try {
-            val have = if (file.exists()) file.length() else 0L
-            setDl(key, progressInfo(have, d.total).copy(status = "Connecting…"))
-            val req = Request.Builder().url(url).header("User-Agent", Net.UA)
-                .apply { if (have > 0L) header("Range", "bytes=$have-") }
-                .build()
-            val call = Net.client.newCall(req)
-            dlCalls[key] = call
-            call.execute().use { r ->
-                if (r.code == 416 && have > 0L) {
+        var attempt = 0
+        while (true) {
+            try {
+                downloadOnce(d, url, file, key)
+                return
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                dlCalls.remove(key)
+                if (dlPaused.contains(key)) return
+                attempt++
+                val size = if (file.exists()) file.length() else 0L
+                if (attempt >= 8) {
+                    setDl(key, DlInfo("Failed (${e.message ?: "error"}) · tap to retry", 0, size, d.total, false, true))
+                    return
+                }
+                setDl(key, progressInfo(size, d.total).copy(status = "Connection lost, retrying ($attempt)…"))
+                delay(2000L * attempt)
+            }
+        }
+    }
+
+    private suspend fun downloadOnce(d: Download, url: String, file: File, key: String) {
+        val have = if (file.exists()) file.length() else 0L
+        setDl(key, progressInfo(have, d.total).copy(status = "Connecting…"))
+        val req = Request.Builder().url(url).header("User-Agent", Net.UA)
+            .apply { if (have > 0L) header("Range", "bytes=$have-") }
+            .build()
+        val call = Net.client.newCall(req)
+        dlCalls[key] = call
+        call.execute().use { r ->
+            if (r.code == 416 && have > 0L) {
+                val range = r.header("Content-Range").orEmpty()
+                val match = Regex("""bytes \*/(\d+)""").find(range)
+                val serverTotal = match?.groupValues?.get(1)?.toLongOrNull()
+                if (serverTotal != null && have == serverTotal) {
                     finishDownload(d, have)
                     return
                 }
-                if (!r.isSuccessful) throw IOException(if (r.code == 401 || r.code == 403) "Access denied" else "HTTP ${r.code}")
-                val body = r.body ?: throw IOException("Empty response")
-                val resumed = r.code == 206 && have > 0L
-                val start = if (resumed) have else 0L
-                val total = if (body.contentLength() > 0L) body.contentLength() + start else 0L
-                var done = start
-                var last = 0L
-                FileOutputStream(file, resumed).use { out ->
-                    body.byteStream().use { inp ->
-                        val buf = ByteArray(64 * 1024)
-                        while (true) {
-                            coroutineContext.ensureActive()
-                            val n = inp.read(buf)
-                            if (n < 0) break
-                            out.write(buf, 0, n)
-                            done += n
-                            val now = System.currentTimeMillis()
-                            if (now - last > 500L) {
-                                last = now
-                                setDl(key, progressInfo(done, total))
-                            }
+                throw IOException("Invalid resume range")
+            }
+            if (!r.isSuccessful) throw IOException(if (r.code == 401 || r.code == 403) "Access denied" else "HTTP ${r.code}")
+            val body = r.body ?: throw IOException("Empty response")
+            val resumed = r.code == 206 && have > 0L
+            val start = if (resumed) have else 0L
+            val expected = body.contentLength()
+            val total = if (expected > 0L) expected + start else 0L
+            var done = start
+            var last = 0L
+            FileOutputStream(file, resumed).use { out ->
+                body.byteStream().use { inp ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val n = inp.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        done += n
+                        val now = System.currentTimeMillis()
+                        if (now - last > 500L) {
+                            last = now
+                            setDl(key, progressInfo(done, total))
                         }
                     }
                 }
-                if (total > 0L && done < total) throw IOException("Connection lost")
-                finishDownload(d, done)
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            dlCalls.remove(key)
-            if (!dlPaused.contains(key)) {
-                val size = if (file.exists()) file.length() else 0L
-                setDl(key, DlInfo("Failed (${e.message ?: "error"}) · tap to retry", 0, size, d.total, false, true))
-            }
+            if (total > 0L && done < total) throw IOException("Connection lost")
+            finishDownload(d, done)
         }
     }
 
