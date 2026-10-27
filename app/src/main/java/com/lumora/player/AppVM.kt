@@ -1,9 +1,9 @@
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.lumora.player
 
 import android.app.Application
-import android.app.DownloadManager
 import android.net.Uri
-import android.content.Context
 import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -12,14 +12,31 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import org.json.JSONObject
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import okhttp3.Call
+import okhttp3.Request
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.coroutineContext
 
 data class PlayReq(val url: String, val title: String, val kind: String, val item: Item?, val src: Source?)
 
-data class DlInfo(val status: String, val percent: Int, val done: Long, val total: Long, val ready: Boolean, val failed: Boolean)
+data class DlInfo(val status: String, val percent: Int, val done: Long, val total: Long, val ready: Boolean, val failed: Boolean, val paused: Boolean = false)
 
 val ADULT = Regex("xxx|adult|\\+18|18\\+|للكبار", RegexOption.IGNORE_CASE)
 
@@ -69,6 +86,20 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var unlocked by mutableStateOf(false)
     var accentIdx by mutableStateOf(Store.getString("accent", "0").toIntOrNull() ?: 0)
     var castOn by mutableStateOf(Store.getBool("castOn", true))
+
+    // ---------- player state: lives here so playback keeps going when minimized or in picture-in-picture ----------
+    var exo: ExoPlayer? = null
+    var isPlaying by mutableStateOf(false)
+    var buffering by mutableStateOf(true)
+    var playerError by mutableStateOf("")
+    var minimized by mutableStateOf(false)
+    var showDownloads by mutableStateOf(false)
+    private var playerUrl = ""
+    private var playerItem: Item? = null
+    private var playerKind = ""
+    private var playerRetries = 0
+    private var resumeAt = 0L
+    private var resumed = false
 
     init {
         sources.addAll(Store.sources())
@@ -239,8 +270,10 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun open(it: Item, auto: Boolean = false) {
         val s = srcOf(it.srcId) ?: src() ?: return
         detailJob?.cancel()
+        releasePlayer()
         playing = null
         full = false
+        minimized = false
         meta = null
         episodes = emptyList()
         episodesLoading = false
@@ -320,14 +353,6 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         playOrCast(PlayReq(Xtream.resolve(s, it), it.name, it.kind, it, s))
     }
 
-    fun closeDetail() {
-        playing = null
-        detail = null
-        full = false
-        meta = null
-        detailJob?.cancel()
-    }
-
     fun canStep(delta: Int): Boolean {
         val cur = playing?.item ?: return false
         val i = playList.indexOfFirst { x -> x.id == cur.id }
@@ -353,7 +378,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     /** Sends to the TV when "Play on TV" is on and a TV is linked; otherwise plays on this phone. */
     fun playOrCast(req: PlayReq) {
         if (!castOn || !TvLink.paired()) {
-            playing = req
+            startPlayback(req)
             return
         }
         message = "Connecting to TV…"
@@ -362,10 +387,118 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             if (ok) {
                 message = "Sent to TV"
             } else {
-                playing = req
+                startPlayback(req)
                 message = "TV is offline, playing on this phone"
             }
         }
+    }
+
+    fun startPlayback(req: PlayReq) {
+        playing = req
+        minimized = false
+        ensurePlayer(req)
+    }
+
+    /** Builds one player per video. Playback state is kept here, not in the screen. */
+    fun ensurePlayer(req: PlayReq) {
+        if (exo != null && playerUrl == req.url) return
+        releasePlayer()
+        val ctx = getApplication<Application>()
+        val ds = DefaultDataSource.Factory(ctx, OkHttpDataSource.Factory(Net.client).setUserAgent(Net.UA))
+        val p = ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ds)).build()
+        playerUrl = req.url
+        playerItem = req.item
+        playerKind = req.kind
+        playerRetries = 0
+        resumed = false
+        playerError = ""
+        resumeAt = if (req.kind == "live" || !resumeOn) 0L else (req.item?.let { progressOf(it) } ?: 0L)
+        p.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                buffering = state == Player.STATE_BUFFERING
+                if (state == Player.STATE_READY) {
+                    if (!resumed) {
+                        resumed = true
+                        if (resumeAt > 0L) p.seekTo(resumeAt)
+                    }
+                    playerError = ""
+                    playerRetries = 0
+                }
+            }
+
+            override fun onIsPlayingChanged(v: Boolean) {
+                isPlaying = v
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (playerRetries < 6) {
+                    playerRetries++
+                    val wait = (700L * playerRetries).coerceAtMost(5000L)
+                    viewModelScope.launch {
+                        delay(wait)
+                        if (exo === p) try {
+                            p.prepare()
+                            p.play()
+                        } catch (_: Exception) {
+                        }
+                    }
+                } else {
+                    playerError = "Could not load this content."
+                }
+            }
+        })
+        p.setMediaItem(MediaItem.fromUri(req.url))
+        p.playWhenReady = true
+        p.prepare()
+        exo = p
+    }
+
+    fun releasePlayer() {
+        saveCurrentProgress()
+        exo?.release()
+        exo = null
+        playerUrl = ""
+        isPlaying = false
+        buffering = true
+        playerError = ""
+    }
+
+    fun saveCurrentProgress() {
+        val p = exo ?: return
+        val item = playerItem ?: return
+        if (playerKind != "live") saveProgress(item, p.currentPosition, p.duration.coerceAtLeast(0L))
+    }
+
+    fun togglePlay() {
+        val p = exo ?: return
+        if (p.isPlaying) p.pause() else p.play()
+    }
+
+    fun retryPlayback() {
+        val req = playing ?: return
+        releasePlayer()
+        ensurePlayer(req)
+    }
+
+    /** Back button while playing: the video moves to a small bar at the bottom and keeps playing. */
+    fun minimize() {
+        if (playing == null) return
+        full = false
+        minimized = true
+    }
+
+    fun expand() {
+        minimized = false
+    }
+
+    fun closeDetail() {
+        releasePlayer()
+        playing = null
+        detail = null
+        full = false
+        minimized = false
+        meta = null
+        detailJob?.cancel()
     }
 
     fun cast(p: PlayReq, startSec: Long, closePlayer: Boolean) {
@@ -377,7 +510,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val ok = TvLink.sendWhenReachable("cast", castData(p, startSec))
             message = if (ok) "Sent to TV" else "Could not reach the TV (same Wi-Fi?)"
-            if (ok && closePlayer) { playing = null; full = false }
+            if (ok && closePlayer) { releasePlayer(); playing = null; full = false; minimized = false }
         }
     }
 
@@ -452,106 +585,189 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun mostViewed(): List<Viewed> = viewed.sortedByDescending { v -> v.count }.take(12)
 
-    // ---------- offline downloads ----------
-    private val dm: DownloadManager
-        get() = getApplication<Application>().getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+    // ---------- offline downloads: own resumable downloader (tap to pause, tap again to resume) ----------
+    private val dlJobs = ConcurrentHashMap<String, Job>()
+    private val dlCalls = ConcurrentHashMap<String, Call>()
+    private val dlPaused: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
-    fun download(item: Item) {
-        val s = srcOf(item.srcId) ?: src() ?: return
-        val old = downloads.firstOrNull { d -> d.item.key == item.key }
-        if (old != null) {
-            if (dlInfo[item.key]?.failed == true) {
-                try {
-                    dm.remove(old.downloadId)
-                } catch (_: Exception) {
-                }
-                downloads.remove(old)
-            } else {
-                message = "Already downloaded or downloading"
-                return
-            }
-        }
+    private fun dlDir(): File {
         val app = getApplication<Application>()
-        val ext = item.ext.ifBlank { "mp4" }
-        val base = item.name.replace(Regex("[^A-Za-z0-9._-]+"), "_").trim('_').take(60).ifBlank { "video" }
-        val fileName = base + "_" + item.kind + item.id + "_" + (item.srcId.hashCode() and 0x7fffffff) + "." + ext
-        val req = DownloadManager.Request(Uri.parse(Xtream.resolve(s, item)))
-            .setTitle(item.name)
-            .setDescription("Lumora")
-            .addRequestHeader("User-Agent", Net.UA)
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setAllowedOverMetered(true)
-            .setAllowedOverRoaming(true)
-            .setDestinationInExternalFilesDir(app, Environment.DIRECTORY_MOVIES, fileName)
-        val id = dm.enqueue(req)
-        downloads.add(0, Download(item, id))
-        dlInfo[item.key] = DlInfo("Starting…", 0, 0L, 0L, false, false)
-        Store.saveDownloads(downloads)
-        message = "Download started"
+        return (app.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: File(app.filesDir, "movies")).apply { mkdirs() }
     }
 
-    /** Reads progress for every download in one system query. Called every second by the poller below. */
-    fun refreshDownloads() {
-        if (downloads.isEmpty()) {
-            if (dlInfo.isNotEmpty()) dlInfo.clear()
+    /** After a restart nothing is running: unfinished downloads show as paused and continue from the saved part. */
+    fun restoreDownloads() {
+        downloads.removeAll { x -> x.path.isEmpty() }
+        for (d in downloads) {
+            val f = File(d.path)
+            val size = if (f.exists()) f.length() else 0L
+            dlInfo[d.item.key] = if (d.done && f.exists()) {
+                DlInfo("Ready offline", 100, size, size, true, false)
+            } else {
+                val pct = if (d.total > 0L) ((size * 100) / d.total).toInt().coerceIn(0, 100) else 0
+                DlInfo("Paused · tap to resume", pct, size, d.total, false, false, true)
+            }
+        }
+    }
+
+    /** The download button: starts, pauses while running, resumes when paused or failed. */
+    fun download(item: Item) {
+        val key = item.key
+        val d = downloads.firstOrNull { x -> x.item.key == key }
+        when {
+            d == null -> {
+                if ((srcOf(item.srcId) ?: src()) == null) return
+                val ext = item.ext.ifBlank { "mp4" }
+                val base = item.name.replace(Regex("[^A-Za-z0-9._-]+"), "_").trim('_').take(60).ifBlank { "video" }
+                val file = File(dlDir(), base + "_" + item.kind + item.id + "_" + (item.srcId.hashCode() and 0x7fffffff) + "." + ext)
+                val nd = Download(item, System.currentTimeMillis(), file.absolutePath)
+                downloads.add(0, nd)
+                Store.saveDownloads(downloads)
+                startDownload(nd)
+                message = "Download started"
+            }
+            d.done -> message = "Already downloaded"
+            dlJobs[key]?.isActive == true -> pauseDownload(d)
+            else -> {
+                startDownload(d)
+                message = "Download resumed"
+            }
+        }
+    }
+
+    private fun startDownload(d: Download) {
+        val key = d.item.key
+        val s = srcOf(d.item.srcId) ?: src()
+        if (s == null) {
+            setDl(key, DlInfo("Source missing", 0, 0L, 0L, false, true))
             return
         }
-        val byId = HashMap<Long, String>()
-        downloads.forEach { byId[it.downloadId] = it.item.key }
-        val found = HashSet<Long>()
+        dlPaused.remove(key)
+        dlJobs[key]?.cancel()
+        val url = Xtream.resolve(s, d.item)
+        val file = File(d.path)
+        dlJobs[key] = viewModelScope.launch(Dispatchers.IO) { runDownload(d, url, file) }
+    }
+
+    private suspend fun runDownload(d: Download, url: String, file: File) {
+        val key = d.item.key
         try {
-            val q = DownloadManager.Query().setFilterById(*byId.keys.toLongArray())
-            dm.query(q)?.use { cur ->
-                while (cur.moveToNext()) {
-                    val id = cur.getLong(cur.getColumnIndexOrThrow(DownloadManager.COLUMN_ID))
-                    val key = byId[id] ?: continue
-                    val st = cur.getInt(cur.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                    val done = cur.getLong(cur.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-                    val total = cur.getLong(cur.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-                    val pct = if (total > 0) ((done * 100) / total).toInt().coerceIn(0, 100) else 0
-                    found.add(id)
-                    val next = when (st) {
-                        DownloadManager.STATUS_SUCCESSFUL -> DlInfo("Ready offline", 100, done, total, true, false)
-                        DownloadManager.STATUS_FAILED -> DlInfo("Failed · tap download to retry", pct, done, total, false, true)
-                        DownloadManager.STATUS_PAUSED -> DlInfo("Waiting for network…", pct, done, total, false, false)
-                        DownloadManager.STATUS_PENDING -> DlInfo("Starting…", 0, 0L, total, false, false)
-                        else -> DlInfo(if (total > 0) "Downloading $pct%" else "Downloading…", pct, done, total, false, false)
-                    }
-                    if (dlInfo[key] != next) dlInfo[key] = next
+            val have = if (file.exists()) file.length() else 0L
+            setDl(key, progressInfo(have, d.total).copy(status = "Connecting…"))
+            val req = Request.Builder().url(url).header("User-Agent", Net.UA)
+                .apply { if (have > 0L) header("Range", "bytes=$have-") }
+                .build()
+            val call = Net.client.newCall(req)
+            dlCalls[key] = call
+            call.execute().use { r ->
+                if (r.code == 416 && have > 0L) {
+                    finishDownload(d, have)
+                    return
                 }
+                if (!r.isSuccessful) throw IOException(if (r.code == 401 || r.code == 403) "Access denied" else "HTTP ${r.code}")
+                val body = r.body ?: throw IOException("Empty response")
+                val resumed = r.code == 206 && have > 0L
+                val start = if (resumed) have else 0L
+                val total = if (body.contentLength() > 0L) body.contentLength() + start else 0L
+                var done = start
+                var last = 0L
+                FileOutputStream(file, resumed).use { out ->
+                    body.byteStream().use { inp ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            coroutineContext.ensureActive()
+                            val n = inp.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            done += n
+                            val now = System.currentTimeMillis()
+                            if (now - last > 500L) {
+                                last = now
+                                setDl(key, progressInfo(done, total))
+                            }
+                        }
+                    }
+                }
+                if (total > 0L && done < total) throw IOException("Connection lost")
+                finishDownload(d, done)
             }
-        } catch (_: Exception) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            dlCalls.remove(key)
+            if (!dlPaused.contains(key)) {
+                val size = if (file.exists()) file.length() else 0L
+                setDl(key, DlInfo("Failed (${e.message ?: "error"}) · tap to retry", 0, size, d.total, false, true))
+            }
         }
-        downloads.forEach { d ->
-            if (d.downloadId !in found) {
-                val next = DlInfo("Removed from system", 0, 0L, 0L, false, true)
-                if (dlInfo[d.item.key] != next) dlInfo[d.item.key] = next
+    }
+
+    private fun pauseDownload(d: Download) {
+        val key = d.item.key
+        dlPaused.add(key)
+        dlCalls.remove(key)?.cancel()
+        dlJobs.remove(key)?.cancel()
+        val f = File(d.path)
+        val size = if (f.exists()) f.length() else 0L
+        val total = dlInfo[key]?.total?.takeIf { it > 0L } ?: d.total
+        setDl(key, progressInfo(size, total).copy(status = "Paused · tap to resume", paused = true))
+        message = "Download paused"
+    }
+
+    private fun progressInfo(done: Long, total: Long): DlInfo {
+        val pct = if (total > 0L) ((done * 100) / total).toInt().coerceIn(0, 100) else 0
+        return DlInfo(if (total > 0L) "Downloading $pct%" else "Downloading…", pct, done, total, false, false, false)
+    }
+
+    private fun setDl(key: String, info: DlInfo) {
+        viewModelScope.launch {
+            if (dlPaused.contains(key) && !info.paused) return@launch
+            if (downloads.any { x -> x.item.key == key }) dlInfo[key] = info
+        }
+    }
+
+    private fun finishDownload(d: Download, size: Long) {
+        val key = d.item.key
+        dlCalls.remove(key)
+        dlJobs.remove(key)
+        dlPaused.remove(key)
+        viewModelScope.launch {
+            val i = downloads.indexOfFirst { x -> x.item.key == key }
+            if (i >= 0) {
+                downloads[i] = downloads[i].copy(total = size, done = true)
+                Store.saveDownloads(downloads)
             }
+            dlInfo[key] = DlInfo("Ready offline", 100, size, size, true, false)
         }
     }
 
     fun playOffline(d: Download) {
-        val uri = dm.getUriForDownloadedFile(d.downloadId)
-        if (uri == null) {
-            message = "Not downloaded yet"
+        val f = File(d.path)
+        if (!f.exists()) {
+            message = "The file is missing"
             return
         }
         showSettings = false
+        showDownloads = false
         detailJob?.cancel()
         detail = d.item
         meta = null
         episodes = emptyList()
         playList = emptyList()
-        playing = PlayReq(uri.toString(), d.item.name, d.item.kind, d.item, srcOf(d.item.srcId))
+        startPlayback(PlayReq(Uri.fromFile(f).toString(), d.item.name, d.item.kind, d.item, srcOf(d.item.srcId)))
     }
 
     fun deleteDownload(d: Download) {
+        val key = d.item.key
+        dlJobs.remove(key)?.cancel()
+        dlCalls.remove(key)?.cancel()
+        dlPaused.remove(key)
         try {
-            dm.remove(d.downloadId)
+            File(d.path).delete()
         } catch (_: Exception) {
         }
-        downloads.removeAll { x -> x.item.key == d.item.key }
-        dlInfo.remove(d.item.key)
+        downloads.removeAll { x -> x.item.key == key }
+        dlInfo.remove(key)
         Store.saveDownloads(downloads)
     }
 
@@ -583,12 +799,15 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         Store.saveFavs(favs)
     }
 
-    // ---------- background poller (downloads progress) ----------
+    // ---------- startup and background work ----------
     init {
+        restoreDownloads()
         viewModelScope.launch {
+            var n = 0
             while (true) {
-                refreshDownloads()
                 delay(1000L)
+                n++
+                if (n % 5 == 0) saveCurrentProgress()
             }
         }
     }

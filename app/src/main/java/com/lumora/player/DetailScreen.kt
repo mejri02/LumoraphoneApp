@@ -84,7 +84,7 @@ fun DetailScreen(vm: AppVM, item: Item) {
     }
 
     BackHandler(enabled = !vm.pip) {
-        if (full) toggleFull() else vm.closeDetail()
+        if (full) toggleFull() else if (req != null) vm.minimize() else vm.closeDetail()
     }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).blockTouches()) {
@@ -97,7 +97,7 @@ fun DetailScreen(vm: AppVM, item: Item) {
                 PlayerPane(
                     vm, req, full = full, pip = false,
                     onToggleFull = { toggleFull() },
-                    onBack = { if (full) toggleFull() else vm.closeDetail() },
+                    onBack = { if (full) toggleFull() else vm.minimize() },
                     modifier = if (full) Modifier.fillMaxSize().align(Alignment.TopStart)
                     else Modifier.fillMaxWidth().padding(top = statusTop).height(playerH).align(Alignment.TopStart)
                 )
@@ -254,10 +254,17 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
                     if (item.kind == "vod" || item.kind == "ep") {
                         val d = vm.dlInfo[item.key]
                         ActionCell(
-                            if (d?.ready == true) Icons.Default.Check else Icons.Default.Download,
+                            when {
+                                d?.ready == true -> Icons.Default.Check
+                                d?.paused == true -> Icons.Default.PlayArrow
+                                d?.failed == true -> Icons.Default.Refresh
+                                d != null -> Icons.Default.Pause
+                                else -> Icons.Default.Download
+                            },
                             when {
                                 d == null -> "Download"
                                 d.ready -> "Offline"
+                                d.paused -> "Resume"
                                 d.failed -> "Retry"
                                 else -> "${d.percent}%"
                             },
@@ -397,6 +404,7 @@ private fun EpisodeRow(vm: AppVM, serie: Item, e: Item, current: Boolean) {
         IconButton(onClick = { vm.download(e.copy(name = serie.name + " · S" + e.season + "E" + e.num)) }) {
             when {
                 dl?.ready == true -> Icon(Icons.Default.Check, "Offline", tint = Color(0xFF10B981))
+                dl?.paused == true -> Icon(Icons.Default.PlayArrow, "Resume", tint = Color(0xFFB8BBC6))
                 dl != null && !dl.failed -> Text("${dl.percent}%", fontSize = 11.sp, color = Color.Gray)
                 else -> Icon(Icons.Default.Download, "Download", tint = Color(0xFFB8BBC6))
             }

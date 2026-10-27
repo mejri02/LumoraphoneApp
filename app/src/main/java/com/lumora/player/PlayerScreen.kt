@@ -2,12 +2,6 @@
 
 package com.lumora.player
 
-import android.app.Activity
-import android.app.PictureInPictureParams
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.util.Rational
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -25,20 +19,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
@@ -60,8 +45,8 @@ private fun CtrlBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, desc:
 }
 
 /**
- * Video surface with our own controls. Used inline at the top of the detail page (16:9) and
- * full screen (landscape / fullscreen button). One instance is kept while switching between the two.
+ * Video surface with our own controls. The player itself lives in AppVM, so this pane can
+ * leave the screen (minimize) or move into picture-in-picture without stopping the video.
  */
 @Composable
 fun PlayerPane(
@@ -73,97 +58,26 @@ fun PlayerPane(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val exo = vm.exo ?: return
     val ctx = LocalContext.current
-    val act = ctx as Activity
-    val handler = remember { Handler(Looper.getMainLooper()) }
     val live = req.kind == "live"
-    val resumeAt = remember(req.url) { if (live || !vm.resumeOn) 0L else (req.item?.let { vm.progressOf(it) } ?: 0L) }
-    var resumed by remember(req.url) { mutableStateOf(false) }
-    var buffering by remember(req.url) { mutableStateOf(true) }
-    var errorMsg by remember(req.url) { mutableStateOf("") }
+    val isPlaying = vm.isPlaying
+    val buffering = vm.buffering
+    val errorMsg = vm.playerError
     var show by remember { mutableStateOf(true) }
     var tick by remember { mutableIntStateOf(0) }
     var resize by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var speed by remember { mutableFloatStateOf(1f) }
     var pos by remember(req.url) { mutableLongStateOf(0L) }
     var dur by remember(req.url) { mutableLongStateOf(0L) }
-    var isPlaying by remember(req.url) { mutableStateOf(true) }
     var drag by remember { mutableStateOf<Float?>(null) }
     var hint by remember { mutableStateOf("") }
-    var attempt by remember(req.url) { mutableIntStateOf(0) }
-
-    val exo = remember(req.url, attempt) {
-        val ds = androidx.media3.datasource.DefaultDataSource.Factory(ctx, OkHttpDataSource.Factory(Net.client).setUserAgent(Net.UA))
-        ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ds)).build().apply {
-            setMediaItem(MediaItem.fromUri(req.url))
-            playWhenReady = true
-            prepare()
-        }
-    }
-
-    fun save() {
-        req.item?.let { if (!live) vm.saveProgress(it, exo.currentPosition, exo.duration.coerceAtLeast(0L)) }
-    }
-
-    DisposableEffect(exo) {
-        var retries = 0
-        val l = object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                buffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_READY) {
-                    if (!resumed) {
-                        resumed = true
-                        if (resumeAt > 0L) exo.seekTo(resumeAt)
-                    }
-                    errorMsg = ""
-                    retries = 0
-                }
-            }
-
-            override fun onIsPlayingChanged(p: Boolean) {
-                isPlaying = p
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                if (retries < 6) {
-                    retries++
-                    handler.postDelayed({
-                        try {
-                            exo.prepare()
-                            exo.play()
-                        } catch (_: Exception) {
-                        }
-                    }, (700L * retries).coerceAtMost(5000))
-                } else {
-                    errorMsg = "Could not load this content."
-                }
-            }
-        }
-        exo.addListener(l)
-        onDispose {
-            save()
-            handler.removeCallbacksAndMessages(null)
-            exo.removeListener(l)
-            exo.release()
-        }
-    }
-
-    // keep progress safe even if Android kills the app in the background
-    val owner = LocalLifecycleOwner.current
-    DisposableEffect(owner, exo) {
-        val ob = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_STOP || e == Lifecycle.Event.ON_PAUSE) save() }
-        owner.lifecycle.addObserver(ob)
-        onDispose { owner.lifecycle.removeObserver(ob) }
-    }
 
     LaunchedEffect(exo) {
-        var n = 0
         while (true) {
-            delay(500)
             pos = exo.currentPosition
             dur = exo.duration.coerceAtLeast(0L)
-            n++
-            if (n % 10 == 0 && exo.isPlaying) save()
+            delay(500)
         }
     }
 
@@ -236,7 +150,7 @@ fun PlayerPane(
             ) {
                 Text(errorMsg, color = Color.White)
                 Spacer(Modifier.height(8.dp))
-                Button(onClick = { errorMsg = ""; attempt++ }) { Text("Retry") }
+                Button(onClick = { vm.retryPlayback() }) { Text("Retry") }
             }
         }
 
@@ -249,7 +163,7 @@ fun PlayerPane(
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CtrlBtn(Icons.Default.ArrowBack, "Back", 44) { onBack() }
+                CtrlBtn(Icons.Default.ArrowBack, "Minimize", 44) { onBack() }
                 Text(
                     req.title, Modifier.weight(1f), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     fontSize = 14.sp, fontWeight = FontWeight.Medium
@@ -258,10 +172,7 @@ fun PlayerPane(
                     vm.cast(req, if (live) 0L else exo.currentPosition / 1000, true)
                 }
                 CtrlBtn(Icons.Default.PictureInPictureAlt, "PiP", 40) {
-                    if (Build.VERSION.SDK_INT >= 26) try {
-                        act.enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build())
-                    } catch (_: Exception) {
-                    }
+                    (ctx as? MainActivity)?.enterPip()
                 }
             }
 
@@ -276,7 +187,7 @@ fun PlayerPane(
                 Box(
                     Modifier.size(if (full) 68.dp else 58.dp).clip(CircleShape).background(Color(0xE6FFFFFF))
                         .clickable {
-                            if (exo.isPlaying) exo.pause() else exo.play()
+                            vm.togglePlay()
                             tick++
                         },
                     contentAlignment = Alignment.Center

@@ -6,7 +6,14 @@
 
 package com.lumora.player
 
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -52,6 +59,16 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val vm: AppVM by viewModels()
 
+    /** Pause / close buttons inside the picture-in-picture window. */
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            when (i?.getStringExtra("cmd")) {
+                "toggle" -> vm.togglePlay()
+                "close" -> vm.closeDetail()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -66,6 +83,7 @@ class MainActivity : ComponentActivity() {
         Store.init(applicationContext)
         CatalogCache.init(applicationContext)
         TvLink.init()
+        ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(PIP_ACTION), ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -79,6 +97,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onDestroy() {
+        try {
+            unregisterReceiver(pipReceiver)
+        } catch (_: Exception) {
+        }
+        super.onDestroy()
+    }
+
     override fun onResume() {
         super.onResume()
         TvLink.resume()
@@ -86,22 +112,65 @@ class MainActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (vm.playing != null && Build.VERSION.SDK_INT >= 26) {
-            try {
-                enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build())
-            } catch (_: Exception) {
-            }
+        // Android 12+ enters picture-in-picture on its own (see pipParams); older versions are handled here.
+        if (vm.playing != null && Build.VERSION.SDK_INT in 26..30) enterPip()
+    }
+
+    fun enterPip() {
+        val p = pipParams() ?: return
+        try {
+            enterPictureInPictureMode(p)
+        } catch (_: Exception) {
         }
+    }
+
+    fun refreshPip() {
+        val p = pipParams() ?: return
+        try {
+            setPictureInPictureParams(p)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun pipParams(): PictureInPictureParams? {
+        if (Build.VERSION.SDK_INT < 26) return null
+        val playing = vm.isPlaying
+        val pauseIcon = if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val actions = listOf(
+            android.app.RemoteAction(
+                android.graphics.drawable.Icon.createWithResource(this, pauseIcon),
+                if (playing) "Pause" else "Play", "Play or pause",
+                PendingIntent.getBroadcast(
+                    this, 1, Intent(PIP_ACTION).setPackage(packageName).putExtra("cmd", "toggle"),
+                    PendingIntent.FLAG_IMMUTABLE
+                )
+            ),
+            android.app.RemoteAction(
+                android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                "Close", "Close",
+                PendingIntent.getBroadcast(
+                    this, 2, Intent(PIP_ACTION).setPackage(packageName).putExtra("cmd", "close"),
+                    PendingIntent.FLAG_IMMUTABLE
+                )
+            )
+        )
+        val b = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).setActions(actions)
+        if (Build.VERSION.SDK_INT >= 31) b.setAutoEnterEnabled(vm.playing != null)
+        return b.build()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         vm.pip = isInPictureInPictureMode
     }
+
+    companion object {
+        const val PIP_ACTION = "com.lumora.player.PIP_CONTROL"
+    }
 }
 
 @Composable
-fun TopBar(vm: AppVM, onRemote: () -> Unit, onCast: () -> Unit) {
+fun TopBar(vm: AppVM, onRemote: () -> Unit, onCast: () -> Unit, onDownloads: () -> Unit) {
     val primary = MaterialTheme.colorScheme.primary
     Row(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).statusBarsPadding()
@@ -117,6 +186,7 @@ fun TopBar(vm: AppVM, onRemote: () -> Unit, onCast: () -> Unit) {
         Spacer(Modifier.weight(1f))
         val tv = TvLink.activeTv()
         if (tv != null) IconButton(onClick = onRemote, modifier = Modifier.size(42.dp)) { Icon(Icons.Default.SettingsRemote, "Remote") }
+        IconButton(onClick = onDownloads, modifier = Modifier.size(42.dp)) { Icon(Icons.Default.Download, "Downloads") }
         IconButton(onClick = onCast, modifier = Modifier.size(42.dp)) {
             Box {
                 Icon(
@@ -154,10 +224,20 @@ fun Root(vm: AppVM) {
     }
     @Suppress("UNUSED_VARIABLE") val ver = TvLink.version.intValue
 
+    val act = LocalContext.current as? MainActivity
+    LaunchedEffect(vm.playing, vm.isPlaying) { act?.refreshPip() }
+    val pipReq = vm.playing
+    if (vm.pip && pipReq != null) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            PlayerPane(vm, pipReq, full = true, pip = true, onToggleFull = {}, onBack = {}, modifier = Modifier.fillMaxSize())
+        }
+        return
+    }
+
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
-            topBar = { TopBar(vm, onRemote = { remoteSheet = true }, onCast = { castSheet = true }) },
+            topBar = { TopBar(vm, onRemote = { remoteSheet = true }, onCast = { castSheet = true }, onDownloads = { vm.showDownloads = true }) },
             bottomBar = {
                 NavigationBar(containerColor = Color(0xFF0F0F15)) {
                     val navItems = listOf(
@@ -184,12 +264,14 @@ fun Root(vm: AppVM) {
         }
 
         vm.openGroup?.let { CategoryScreen(vm, it) }
-        vm.detail?.let { DetailScreen(vm, it) }
+        if (!vm.minimized) vm.detail?.let { DetailScreen(vm, it) }
         if (vm.showSettings) SettingsScreen(vm, onEdit = { form = it })
         if (form != null) SourceForm(vm, form!!) { form = null }
         if (castSheet) CastSheet(vm) { castSheet = false }
         if (remoteSheet) RemoteSheet { remoteSheet = false }
         vm.actionItem?.let { ItemActions(vm, it) }
+        if (vm.showDownloads) DownloadsScreen(vm)
+        if (vm.minimized && vm.playing != null) MiniPlayer(vm, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 80.dp))
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 76.dp))
     }
 }
@@ -307,7 +389,7 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             item { ActionRow("Clear continue watching", "Removes saved progress") { vm.clearProgress() } }
             item { ActionRow("Clear favorites", "Removes all favorites") { vm.clearFavs() } }
             item { SettingHeader("About") }
-            item { Text("Lumora 1.5.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
+            item { Text("Lumora 1.6.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
         }
     }
     if (pinDialog) PinDialog(vm) { pinDialog = false }
@@ -337,39 +419,6 @@ fun ActionRow(title: String, sub: String, onClick: () -> Unit) {
     ) {
         Text(title)
         Text(sub, fontSize = 12.sp, color = Color.Gray)
-    }
-}
-
-@Composable
-fun DownloadRow(vm: AppVM, d: Download) {
-    val info = vm.dlInfo[d.item.key]
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(d.item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    info?.status ?: "Preparing…",
-                    fontSize = 12.sp,
-                    color = if (info?.failed == true) Color(0xFFFF6B6B) else Color.Gray
-                )
-            }
-            if (info?.ready == true) IconButton(onClick = { vm.playOffline(d) }) { Icon(Icons.Default.PlayArrow, "Play") }
-            IconButton(onClick = { vm.deleteDownload(d) }) { Icon(Icons.Default.Delete, "Delete") }
-        }
-        if (info != null && !info.ready && !info.failed) {
-            Spacer(Modifier.height(8.dp))
-            if (info.total > 0) {
-                LinearProgressIndicator(progress = { info.percent / 100f }, modifier = Modifier.fillMaxWidth())
-            } else {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
-            Text(
-                "${info.percent}% · ${fmtBytes(info.done)} / ${fmtBytes(info.total)}",
-                fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp)
-            )
-        }
     }
 }
 

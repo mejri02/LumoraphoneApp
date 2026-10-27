@@ -71,7 +71,7 @@ data class GroupRef(val kind: String, val name: String)
 
 data class Viewed(val item: Item, val count: Int)
 
-data class Download(val item: Item, val downloadId: Long)
+data class Download(val item: Item, val id: Long, val path: String, val total: Long = 0L, val done: Boolean = false)
 
 object Store {
     private lateinit var sp: SharedPreferences
@@ -159,7 +159,7 @@ object Store {
         for (i in 0 until a.length()) {
             try {
                 val o = a.getJSONObject(i)
-                out.add(Download(Item.from(o.getJSONObject("item")), o.optLong("id")))
+                out.add(Download(Item.from(o.getJSONObject("item")), o.optLong("id"), o.optString("path"), o.optLong("total"), o.optBoolean("done")))
             } catch (_: Exception) {
             }
         }
@@ -168,7 +168,7 @@ object Store {
 
     fun saveDownloads(l: List<Download>) {
         val a = JSONArray()
-        l.forEach { a.put(JSONObject().put("item", it.item.toJson()).put("id", it.downloadId)) }
+        l.forEach { a.put(JSONObject().put("item", it.item.toJson()).put("id", it.id).put("path", it.path).put("total", it.total).put("done", it.done)) }
         sp.edit().putString("downloads", a.toString()).apply()
     }
 
