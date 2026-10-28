@@ -123,11 +123,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     init {
         // Online subtitle API integration removed; subtitles are loaded from local files.
         sources.addAll(Store.sources())
-        favs.addAll(Store.favs())
-        progress.addAll(Store.progress())
-        viewed.addAll(Store.views())
-        downloads.addAll(Store.downloads())
         activeSrc = Store.getString("activeSrc").ifEmpty { sources.firstOrNull()?.id ?: "" }
+        favs.addAll(Store.favsFor(activeSrc))
+        progress.addAll(Store.progressFor(activeSrc))
+        viewed.addAll(Store.viewsFor(activeSrc))
+        downloads.addAll(Store.downloads())
     }
 
     fun src(): Source? = sources.firstOrNull { it.id == activeSrc } ?: sources.firstOrNull()
@@ -160,6 +160,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun selectSource(id: String) {
         activeSrc = id
         Store.putString("activeSrc", id)
+        favs.clear()
+        favs.addAll(Store.favsFor(id))
+        progress.clear()
+        progress.addAll(Store.progressFor(id))
+        viewed.clear()
+        viewed.addAll(Store.viewsFor(id))
         catalog.clear()
         loading.clear()
         updatedAt.clear()
@@ -341,9 +347,10 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun isFav(it: Item) = favs.any { f -> f.key == it.key }
 
     fun toggleFav(it: Item) {
+        if (it.srcId.isBlank() || it.srcId != activeSrc) return
         val i = favs.indexOfFirst { f -> f.key == it.key }
         if (i >= 0) favs.removeAt(i) else favs.add(0, it)
-        Store.saveFavs(favs)
+        Store.saveFavsFor(activeSrc, favs)
     }
 
     // ---------- playback ----------
@@ -640,11 +647,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     // ---------- continue watching ----------
     fun saveProgress(item: Item, pos: Long, dur: Long) {
+        if (item.srcId.isBlank() || item.srcId != activeSrc) return
         if (item.kind == "live" || pos < 8_000L) return
         val finished = dur > 0 && pos > dur * 0.95
         progress.removeAll { p -> p.item.key == item.key }
         if (!finished) progress.add(0, Progress(item, pos, dur, System.currentTimeMillis()))
-        Store.saveProgress(progress)
+        Store.saveProgressFor(activeSrc, progress)
     }
 
     fun progressOf(item: Item): Long? = progress.firstOrNull { p -> p.item.key == item.key }?.pos?.takeIf { it > 0 }
@@ -652,21 +660,23 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun continueWatching(): List<Progress> = progress.take(20)
 
     fun removeProgress(item: Item) {
+        if (item.srcId.isBlank() || item.srcId != activeSrc) return
         progress.removeAll { p -> p.item.key == item.key }
-        Store.saveProgress(progress)
+        Store.saveProgressFor(activeSrc, progress)
     }
 
     fun clearProgress() {
         progress.clear()
-        Store.saveProgress(progress)
+        Store.saveProgressFor(activeSrc, progress)
     }
 
     // ---------- most viewed ----------
     fun bumpView(item: Item) {
+        if (item.srcId.isBlank() || item.srcId != activeSrc) return
         if (item.kind != "live") return
         val i = viewed.indexOfFirst { v -> v.item.key == item.key }
         if (i >= 0) viewed[i] = viewed[i].copy(count = viewed[i].count + 1) else viewed.add(Viewed(item, 1))
-        Store.saveViews(viewed)
+        Store.saveViewsFor(activeSrc, viewed)
     }
 
     fun mostViewed(): List<Viewed> = viewed.sortedByDescending { v -> v.count }.take(12)
@@ -902,7 +912,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun clearFavs() {
         favs.clear()
-        Store.saveFavs(favs)
+        Store.saveFavsFor(activeSrc, favs)
     }
 
     // ---------- startup and background work ----------

@@ -115,6 +115,76 @@ object Store {
 
     private fun arr(k: String): JSONArray = try { JSONArray(sp.getString(k, "[]")) } catch (_: Exception) { JSONArray() }
 
+    private fun sourceKey(base: String, srcId: String) = "${base}_source_${srcId}"
+
+    fun favsFor(srcId: String): MutableList<Item> {
+        val key = sourceKey("favs", srcId)
+        if (sp.contains(key)) {
+            val out = mutableListOf<Item>()
+            val a = arr(key)
+            for (i in 0 until a.length()) try {
+                out.add(Item.from(a.getJSONObject(i)))
+            } catch (_: Exception) {}
+            return out
+        }
+        return favs().filter { it.srcId == srcId && srcId.isNotBlank() }.toMutableList()
+            .also { saveFavsFor(srcId, it) }
+    }
+
+    fun saveFavsFor(srcId: String, l: List<Item>) {
+        val a = JSONArray()
+        l.forEach { a.put(it.toJson()) }
+        sp.edit().putString(sourceKey("favs", srcId), a.toString()).apply()
+    }
+
+    fun progressFor(srcId: String): MutableList<Progress> {
+        val key = sourceKey("progress", srcId)
+        if (sp.contains(key)) {
+            val out = mutableListOf<Progress>()
+            val a = arr(key)
+            for (i in 0 until a.length()) try {
+                val o = a.getJSONObject(i)
+                val item = Item.from(o.getJSONObject("item"))
+                out.add(Progress(item, o.optLong("pos"), o.optLong("dur"), o.optLong("ts")))
+            } catch (_: Exception) {}
+            return out
+        }
+        return progress().filter { it.item.srcId == srcId && srcId.isNotBlank() }.toMutableList()
+            .also { saveProgressFor(srcId, it) }
+    }
+
+    fun saveProgressFor(srcId: String, l: List<Progress>) {
+        val a = JSONArray()
+        l.forEach {
+            a.put(JSONObject().put("item", it.item.toJson())
+                .put("pos", it.pos).put("dur", it.dur).put("ts", it.ts))
+        }
+        sp.edit().putString(sourceKey("progress", srcId), a.toString()).apply()
+    }
+
+    fun viewsFor(srcId: String): MutableList<Viewed> {
+        val key = sourceKey("views", srcId)
+        if (sp.contains(key)) {
+            val out = mutableListOf<Viewed>()
+            val a = arr(key)
+            for (i in 0 until a.length()) try {
+                val o = a.getJSONObject(i)
+                out.add(Viewed(Item.from(o.getJSONObject("item")), o.optInt("count")))
+            } catch (_: Exception) {}
+            return out
+        }
+        return views().filter { it.item.srcId == srcId && srcId.isNotBlank() }.toMutableList()
+            .also { saveViewsFor(srcId, it) }
+    }
+
+    fun saveViewsFor(srcId: String, l: List<Viewed>) {
+        val a = JSONArray()
+        l.forEach {
+            a.put(JSONObject().put("item", it.item.toJson()).put("count", it.count))
+        }
+        sp.edit().putString(sourceKey("views", srcId), a.toString()).apply()
+    }
+
     fun progress(): MutableList<Progress> {
         val out = mutableListOf<Progress>()
         val a = arr("progress")
