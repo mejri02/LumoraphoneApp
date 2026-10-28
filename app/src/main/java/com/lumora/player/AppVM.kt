@@ -265,7 +265,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     val kinds = if (s.type == "xtream") listOf(kind) else listOf("live", "vod", "series")
                     for (k in kinds) {
                         val c = CatalogCache.read(sourceCacheKey(s), k)
-                        if (c != null && src()?.id == s.id) {
+                        if (c != null && src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
                             catalog[k] = c
                             updatedAt[k] = CatalogCache.time(sourceCacheKey(s), k)
                         }
