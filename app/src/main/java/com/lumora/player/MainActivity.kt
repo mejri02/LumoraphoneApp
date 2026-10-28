@@ -333,6 +333,17 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             item { SettingHeader("Sources") }
             items(vm.sources.toList()) { s ->
                 val on = s.id == vm.activeSrc
+                LaunchedEffect(s.id, s.url, s.user, s.pass, s.type) {
+                    if (on) vm.refreshAccountInfo(s, force = true)
+                }
+                val expiryKey = remember(s.id, s.url, s.user, s.pass, s.type) {
+                    // Match the view-model cache identity for the currently displayed source.
+                    val raw = "${s.type}|${s.url.trim().trimEnd('/')}|${s.user.trim()}|${s.pass}|${s.format}"
+                    val digest = java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(raw.toByteArray(Charsets.UTF_8))
+                        .take(12).joinToString("") { "%02x".format(it) }
+                    "${s.id}_$digest"
+                }
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
                         .background(if (on) Color(0xFF2A1520) else MaterialTheme.colorScheme.surfaceVariant)
@@ -342,6 +353,16 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text(s.name.ifBlank { s.url }, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(s.type.uppercase() + (if (on) " · active" else ""), fontSize = 12.sp, color = Color.Gray)
+                        if (on && s.type == "xtream") {
+                            Text(
+                                vm.accountExpiry[expiryKey] ?: "Subscription info not loaded",
+                                fontSize = 12.sp,
+                                color = if ((vm.accountExpiry[expiryKey] ?: "").startsWith("Expired")) Color(0xFFFF6B6B) else Color.Gray
+                            )
+                            vm.accountStatus[expiryKey]?.let { status ->
+                                Text("Status: $status", fontSize = 12.sp, color = Color.Gray)
+                            }
+                        }
                     }
                     if (TvLink.paired()) IconButton(onClick = { vm.sendSourceToTv(s) }) { Icon(Icons.Default.Cast, "Send to TV") }
                     IconButton(onClick = { onEdit(s) }) { Icon(Icons.Default.Edit, "Edit") }
@@ -401,8 +422,8 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                     }
                 }
             }
-            item { SettingHeader("Subtitles · OpenSubtitles") }
-            item { OpenSubtitlesApiSettings(vm) }
+            item { SettingHeader("Subtitles") }
+            item { Text("Load subtitle files (.srt or .vtt) directly from the player. No API key or online account is needed.", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(4.dp)) }
             item { SettingHeader("Downloads (offline)") }
             if (vm.downloads.isEmpty()) item { Text("No downloads yet. Open a movie or episode and tap Download.", color = Color.Gray, fontSize = 13.sp) }
             items(vm.downloads.toList()) { d -> DownloadRow(vm, d) }
@@ -421,31 +442,6 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
         }
     }
     if (pinDialog) PinDialog(vm) { pinDialog = false }
-}
-
-@Composable
-fun OpenSubtitlesApiSettings(vm: AppVM) {
-    var key by rememberSaveable { mutableStateOf(vm.subtitleApiKey) }
-    var showKey by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("API key", fontWeight = FontWeight.SemiBold)
-        Text("Add your OpenSubtitles.com API key to enable subtitle search. It is encrypted on this device.", fontSize = 12.sp, color = Color.Gray)
-        OutlinedTextField(value = key, onValueChange = { key = it; vm.subtitleApiStatus = "" }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-            label = { Text("OpenSubtitles API key") },
-            visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = { IconButton(onClick = { showKey = !showKey }) { Icon(if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (showKey) "Hide key" else "Show key") } })
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = showKey, onCheckedChange = { showKey = it })
-            Text("Show key", fontSize = 13.sp)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(onClick = { vm.subtitleApiStatus = if (vm.saveSubtitleApiKey(key)) "API key saved on this device." else "Could not securely save the key." }, modifier = Modifier.weight(1f)) { Text("Save") }
-            OutlinedButton(enabled = key.isNotBlank() && !vm.subtitleApiTesting, onClick = { vm.testSubtitleApiKey(key) }, modifier = Modifier.weight(1f)) { Text(if (vm.subtitleApiTesting) "Testing…" else "Test connection") }
-        }
-        OutlinedButton(onClick = { key = ""; vm.saveSubtitleApiKey(""); vm.subtitleApiStatus = "API key removed from this device." }, modifier = Modifier.fillMaxWidth()) { Text("Remove key") }
-        if (vm.subtitleApiStatus.isNotBlank()) Text(vm.subtitleApiStatus, color = if (vm.subtitleApiStatus.startsWith("Connected") || vm.subtitleApiStatus.startsWith("API key saved")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
-        TextButton(onClick = { vm.openOpenSubtitlesApiPage() }) { Text("Get an API key") }
-    }
 }
 
 @Composable

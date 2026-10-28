@@ -4,7 +4,6 @@ package com.lumora.player
 
 import android.app.Application
 import android.net.Uri
-import android.content.Intent
 import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -79,6 +78,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     val accents: List<Int> = listOf(0xFFE5173F.toInt(), 0xFF8B5CF6.toInt(), 0xFF3B82F6.toInt(), 0xFF10B981.toInt())
 
     var activeSrc by mutableStateOf("")
+    val accountExpiry = mutableStateMapOf<String, String>()
+    val accountStatus = mutableStateMapOf<String, String>()
     var message by mutableStateOf("")
     var playing by mutableStateOf<PlayReq?>(null)
     var detail by mutableStateOf<Item?>(null)
@@ -103,11 +104,6 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     // Full UI theme; index 0 preserves the original Lumora appearance.
     var themeIdx by mutableStateOf(Store.getString("uiTheme", "0").toIntOrNull()?.coerceIn(0, 2) ?: 0)
     var castOn by mutableStateOf(Store.getBool("castOn", true))
-    var subtitleApiKey by mutableStateOf("")
-        private set
-    var subtitleApiStatus by mutableStateOf("")
-    var subtitleApiTesting by mutableStateOf(false)
-        private set
 
     // ---------- player state: lives here so playback keeps going when minimized or in picture-in-picture ----------
     var exo: ExoPlayer? = null
@@ -124,58 +120,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     private var resumed = false
 
     init {
-        subtitleApiKey = OpenSubtitlesApiKeyStore.read()
-        if (subtitleApiKey.isBlank()) {
-            val legacyKey = Store.getString("opensubtitles_api_key", "")
-            if (legacyKey.isNotBlank() && OpenSubtitlesApiKeyStore.write(legacyKey)) subtitleApiKey = legacyKey
-            Store.putString("opensubtitles_api_key", "")
-        }
+        // Online subtitle API integration removed; subtitles are loaded from local files.
         sources.addAll(Store.sources())
         favs.addAll(Store.favs())
         progress.addAll(Store.progress())
         viewed.addAll(Store.views())
         downloads.addAll(Store.downloads())
         activeSrc = Store.getString("activeSrc").ifEmpty { sources.firstOrNull()?.id ?: "" }
-    }
-
-    fun saveSubtitleApiKey(value: String): Boolean {
-        val ok = OpenSubtitlesApiKeyStore.write(value)
-        if (ok) subtitleApiKey = value.trim()
-        return ok
-    }
-
-    fun testSubtitleApiKey(value: String) {
-        val candidate = value.trim()
-        if (candidate.isEmpty()) { subtitleApiStatus = "Enter an API key first."; return }
-        viewModelScope.launch {
-            subtitleApiTesting = true
-            subtitleApiStatus = "Testing connection…"
-            try {
-                val request = Request.Builder()
-                    .url("https://api.opensubtitles.com/api/v1/subtitles?languages=en&query=matrix")
-                    .header("Api-Key", candidate)
-                    .header("User-Agent", "LumoraTV v1.6.0")
-                    .header("Accept", "application/json").get().build()
-                subtitleApiStatus = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    Net.client.newCall(request).execute().use { response ->
-                        when {
-                            response.isSuccessful -> "Connected: API key accepted."
-                            response.code == 401 || response.code == 403 -> "API key rejected. Check the key in your OpenSubtitles account."
-                            response.code == 429 -> "Connected, but the API rate limit was reached."
-                            else -> "OpenSubtitles returned HTTP ${response.code}."
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-                subtitleApiStatus = "Could not connect. Check your internet connection and try again."
-            } finally { subtitleApiTesting = false }
-        }
-    }
-
-    fun openOpenSubtitlesApiPage() {
-        try {
-            getApplication<Application>().startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.opensubtitles.com/consumers")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        } catch (_: Exception) { subtitleApiStatus = "Open https://www.opensubtitles.com/consumers in your browser." }
     }
 
     fun src(): Source? = sources.firstOrNull { it.id == activeSrc } ?: sources.firstOrNull()
@@ -196,23 +147,77 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         Store.putString("uiTheme", themeIdx.toString())
     }
 
+    private fun sourceCacheKey(s: Source): String {
+        // Include credentials in cache identity so an edited Xtream account never sees old lists.
+        val raw = "${s.type}|${s.url.trim().trimEnd('/')}|${s.user.trim()}|${s.pass}|${s.format}"
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(raw.toByteArray(Charsets.UTF_8))
+            .take(12).joinToString("") { "%02x".format(it) }
+        return "${s.id}_$digest"
+    }
+
     fun selectSource(id: String) {
         activeSrc = id
         Store.putString("activeSrc", id)
         catalog.clear()
+        loading.clear()
+        updatedAt.clear()
+        detail = null
+        meta = null
+        episodes = emptyList()
+        episodesLoading = false
+        openGroup = null
+        playList = emptyList()
     }
 
     fun saveSource(s: Source) {
         val i = sources.indexOfFirst { it.id == s.id }
         if (i >= 0) sources[i] = s else sources.add(s)
         Store.saveSources(sources)
+        catalog.clear()
+        loading.clear()
+        updatedAt.clear()
         selectSource(s.id)
+        message = "Account saved. Loading the new account…"
     }
 
     fun deleteSource(id: String) {
         sources.removeAll { it.id == id }
         Store.saveSources(sources)
         if (activeSrc == id) selectSource(sources.firstOrNull()?.id ?: "")
+    }
+
+    fun refreshAccountInfo(s: Source, force: Boolean = false) {
+        if (s.type != "xtream") return
+        val key = sourceCacheKey(s)
+        if (!force && accountExpiry.containsKey(key)) return
+        accountExpiry[key] = "Loading subscription…"
+        viewModelScope.launch {
+            try {
+                val info = withContext(Dispatchers.IO) {
+                    val raw = Net.text(Xtream.api(s), 30)
+                    org.json.JSONObject(raw).optJSONObject("user_info")
+                        ?: throw java.io.IOException("Account details unavailable")
+                }
+                val exp = info.optString("exp_date").toLongOrNull() ?: 0L
+                val status = info.optString("status").ifBlank { "Unknown" }
+                accountStatus[key] = status
+                accountExpiry[key] = if (exp > 0L) {
+                    val date = java.text.DateFormat.getDateTimeInstance(
+                        java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT
+                    ).format(java.util.Date(exp * 1000L))
+                    val remaining = exp * 1000L - System.currentTimeMillis()
+                    if (remaining <= 0L) "Expired · $date"
+                    else {
+                        val days = remaining / 86_400_000L
+                        "Expires: $date · ${days} day(s) left"
+                    }
+                } else "Expiry not provided by server"
+            } catch (e: Exception) {
+                accountExpiry[key] = "Could not load expiry"
+                accountStatus[key] = e.message ?: "Connection error"
+            }
+        }
     }
 
     fun test(s: Source, done: (String?) -> Unit) {
@@ -239,7 +244,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     private fun stale(s: Source, kind: String): Boolean {
-        val t = CatalogCache.time(s.id, kind)
+        val t = CatalogCache.time(sourceCacheKey(s), kind)
         if (t == 0L) return true
         if (refreshHours <= 0) return false
         return System.currentTimeMillis() - t > refreshHours * 3_600_000L
@@ -258,28 +263,28 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 if (!have && !force) {
                     val kinds = if (s.type == "xtream") listOf(kind) else listOf("live", "vod", "series")
                     for (k in kinds) {
-                        val c = CatalogCache.read(s.id, k)
+                        val c = CatalogCache.read(sourceCacheKey(s), k)
                         if (c != null && src()?.id == s.id) {
                             catalog[k] = c
-                            updatedAt[k] = CatalogCache.time(s.id, k)
+                            updatedAt[k] = CatalogCache.time(sourceCacheKey(s), k)
                         }
                     }
                 }
                 if (force || !catalog.containsKey(kind) || stale(s, kind)) {
                     if (s.type == "xtream") {
                         val list = Xtream.catalog(s, kind)
-                        CatalogCache.write(s.id, kind, list)
-                        if (src()?.id == s.id) {
+                        CatalogCache.write(sourceCacheKey(s), kind, list)
+                        if (src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
                             catalog[kind] = list
                             updatedAt[kind] = System.currentTimeMillis()
                         }
                     } else {
                         val t = Net.text(s.url.trim(), 180)
                         val r = M3u.parse(t, s.id)
-                        CatalogCache.write(s.id, "live", r.first)
-                        CatalogCache.write(s.id, "vod", r.second)
-                        CatalogCache.write(s.id, "series", emptyList())
-                        if (src()?.id == s.id) {
+                        CatalogCache.write(sourceCacheKey(s), "live", r.first)
+                        CatalogCache.write(sourceCacheKey(s), "vod", r.second)
+                        CatalogCache.write(sourceCacheKey(s), "series", emptyList())
+                        if (src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
                             catalog["live"] = r.first
                             catalog["vod"] = r.second
                             catalog["series"] = emptyList()
@@ -289,10 +294,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } catch (e: Exception) {
-                if (!catalog.containsKey(kind)) catalog[kind] = emptyList()
-                if (force || (catalog[kind]?.isEmpty() != false)) message = e.message ?: "Network error"
+                if (src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
+                    if (!catalog.containsKey(kind)) catalog[kind] = emptyList()
+                    if (force || (catalog[kind]?.isEmpty() != false)) message = e.message ?: "Network error"
+                }
             }
-            loading[key] = false
+            if (src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) loading[key] = false
         }
     }
 
