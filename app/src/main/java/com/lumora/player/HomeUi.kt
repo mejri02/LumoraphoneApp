@@ -272,8 +272,19 @@ fun CategoryScreen(vm: AppVM, ref: GroupRef) {
     BackHandler { vm.openGroup = null }
     val all = vm.catalog[ref.kind] ?: emptyList()
     var q by remember(ref) { mutableStateOf("") }
+    var channelSort by rememberSaveable(ref.kind, ref.name) { mutableStateOf("name") }
+    var favoritesOnly by rememberSaveable(ref.kind, ref.name) { mutableStateOf(false) }
     val base = remember(all, ref) { if (ref.name.isEmpty()) all else all.filter { it.group == ref.name } }
-    val list = remember(base, q) { if (q.isBlank()) base else base.filter { it.name.contains(q.trim(), ignoreCase = true) } }
+    val searched = remember(base, q) { if (q.isBlank()) base else base.filter { it.name.contains(q.trim(), ignoreCase = true) } }
+    val favoriteFiltered = remember(searched, favoritesOnly, vm.favs.size) {
+        if (!favoritesOnly) searched else searched.filter { item -> vm.isFav(item) }
+    }
+    val list = remember(favoriteFiltered, channelSort) {
+        when (channelSort) {
+            "category" -> favoriteFiltered.sortedWith(compareBy<Item> { it.group.lowercase() }.thenBy { it.name.lowercase() })
+            else -> favoriteFiltered.sortedBy { it.name.lowercase() }
+        }
+    }
     val title = if (ref.name.isEmpty()) when (ref.kind) { "live" -> "All channels"; "vod" -> "All movies"; else -> "All series" } else ref.name
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).blockTouches().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -295,8 +306,24 @@ fun CategoryScreen(vm: AppVM, ref: GroupRef) {
                 unfocusedBorderColor = Color.Transparent
             )
         )
-        if (ref.kind != "live") SortPills(vm)
-        PosterGrid(vm, list, Modifier.weight(1f))
+        if (ref.kind == "live") {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(selected = channelSort == "name", onClick = { channelSort = "name" }, label = { Text("Name A–Z") })
+                FilterChip(selected = channelSort == "category", onClick = { channelSort = "category" }, label = { Text("Category") })
+                FilterChip(selected = favoritesOnly, onClick = { favoritesOnly = !favoritesOnly }, label = { Text("★ Favorites") })
+            }
+        } else {
+            SortPills(vm)
+        }
+        if (list.isEmpty()) {
+            EmptyState(if (favoritesOnly) "No favorite channels" else "No channels found", if (favoritesOnly) "Mark channels as favorites to find them here" else "Try another search or category")
+        } else {
+            PosterGrid(vm, list, Modifier.weight(1f))
+        }
     }
 }
 

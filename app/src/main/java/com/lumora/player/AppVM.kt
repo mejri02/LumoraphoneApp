@@ -4,6 +4,7 @@ package com.lumora.player
 
 import android.app.Application
 import android.net.Uri
+import android.content.Intent
 import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -51,6 +52,20 @@ fun fmtBytes(b: Long): String = when {
 
 fun AppVM.locked(group: String): Boolean = pin.isNotEmpty() && !unlocked && ADULT.containsMatchIn(group)
 
+private fun friendlyPlaybackError(error: PlaybackException): String {
+    val detail = (error.cause?.message ?: error.message ?: "").lowercase()
+    return when {
+        "timeout" in detail || "timed out" in detail -> "The stream took too long to respond. Check your internet and retry."
+        "404" in detail || "not found" in detail -> "This channel or stream is unavailable (not found). Try another channel."
+        "401" in detail || "403" in detail || "unauthorized" in detail || "forbidden" in detail -> "Access was denied by the provider. Check your subscription or playlist details."
+        "cleartext" in detail -> "The provider connection is blocked by Android security settings."
+        "resolve host" in detail || "unknownhost" in detail || "network" in detail || "connect" in detail -> "Cannot reach the stream server. Check your internet connection."
+        error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ||
+            error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED -> "The stream format is invalid or unsupported. Try another source."
+        else -> "Playback failed. The stream may be offline or unsupported. Check your connection and retry."
+    }
+}
+
 class AppVM(app: Application) : AndroidViewModel(app) {
     val sources = mutableStateListOf<Source>()
     val favs = mutableStateListOf<Item>()
@@ -85,7 +100,14 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var pin by mutableStateOf(Store.getString("pin", ""))
     var unlocked by mutableStateOf(false)
     var accentIdx by mutableStateOf(Store.getString("accent", "0").toIntOrNull() ?: 0)
+    // Full UI theme; index 0 preserves the original Lumora appearance.
+    var themeIdx by mutableStateOf(Store.getString("uiTheme", "0").toIntOrNull()?.coerceIn(0, 2) ?: 0)
     var castOn by mutableStateOf(Store.getBool("castOn", true))
+    var subtitleApiKey by mutableStateOf("")
+        private set
+    var subtitleApiStatus by mutableStateOf("")
+    var subtitleApiTesting by mutableStateOf(false)
+        private set
 
     // ---------- player state: lives here so playback keeps going when minimized or in picture-in-picture ----------
     var exo: ExoPlayer? = null
@@ -102,12 +124,58 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     private var resumed = false
 
     init {
+        subtitleApiKey = OpenSubtitlesApiKeyStore.read()
+        if (subtitleApiKey.isBlank()) {
+            val legacyKey = Store.getString("opensubtitles_api_key", "")
+            if (legacyKey.isNotBlank() && OpenSubtitlesApiKeyStore.write(legacyKey)) subtitleApiKey = legacyKey
+            Store.putString("opensubtitles_api_key", "")
+        }
         sources.addAll(Store.sources())
         favs.addAll(Store.favs())
         progress.addAll(Store.progress())
         viewed.addAll(Store.views())
         downloads.addAll(Store.downloads())
         activeSrc = Store.getString("activeSrc").ifEmpty { sources.firstOrNull()?.id ?: "" }
+    }
+
+    fun saveSubtitleApiKey(value: String): Boolean {
+        val ok = OpenSubtitlesApiKeyStore.write(value)
+        if (ok) subtitleApiKey = value.trim()
+        return ok
+    }
+
+    fun testSubtitleApiKey(value: String) {
+        val candidate = value.trim()
+        if (candidate.isEmpty()) { subtitleApiStatus = "Enter an API key first."; return }
+        viewModelScope.launch {
+            subtitleApiTesting = true
+            subtitleApiStatus = "Testing connection…"
+            try {
+                val request = Request.Builder()
+                    .url("https://api.opensubtitles.com/api/v1/subtitles?languages=en&query=matrix")
+                    .header("Api-Key", candidate)
+                    .header("User-Agent", "LumoraTV v1.6.0")
+                    .header("Accept", "application/json").get().build()
+                subtitleApiStatus = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    Net.client.newCall(request).execute().use { response ->
+                        when {
+                            response.isSuccessful -> "Connected: API key accepted."
+                            response.code == 401 || response.code == 403 -> "API key rejected. Check the key in your OpenSubtitles account."
+                            response.code == 429 -> "Connected, but the API rate limit was reached."
+                            else -> "OpenSubtitles returned HTTP ${response.code}."
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                subtitleApiStatus = "Could not connect. Check your internet connection and try again."
+            } finally { subtitleApiTesting = false }
+        }
+    }
+
+    fun openOpenSubtitlesApiPage() {
+        try {
+            getApplication<Application>().startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.opensubtitles.com/consumers")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) { subtitleApiStatus = "Open https://www.opensubtitles.com/consumers in your browser." }
     }
 
     fun src(): Source? = sources.firstOrNull { it.id == activeSrc } ?: sources.firstOrNull()
@@ -119,8 +187,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun accentInt(): Int = accents[accentIdx.coerceIn(0, accents.size - 1)]
     fun changeAccent(i: Int) {
-        accentIdx = i
-        Store.putString("accent", i.toString())
+        accentIdx = i.coerceIn(0, accents.size - 1)
+        Store.putString("accent", accentIdx.toString())
+    }
+
+    fun changeTheme(i: Int) {
+        themeIdx = i.coerceIn(0, 2)
+        Store.putString("uiTheme", themeIdx.toString())
     }
 
     fun selectSource(id: String) {
@@ -431,19 +504,24 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (playerRetries < 6) {
+                // Keep retries asynchronous so the UI thread stays responsive, and show a
+                // useful reason once automatic retries have been exhausted.
+                playerError = friendlyPlaybackError(error)
+                if (playerRetries < 3) {
                     playerRetries++
-                    val wait = (700L * playerRetries).coerceAtMost(5000L)
+                    val wait = (900L * playerRetries).coerceAtMost(3000L)
                     viewModelScope.launch {
                         delay(wait)
-                        if (exo === p) try {
+                        if (exo === p && playerError.isNotEmpty()) try {
+                            playerError = "Reconnecting…"
                             p.prepare()
                             p.play()
                         } catch (_: Exception) {
+                            playerError = "Unable to reconnect. Check your connection and try again."
                         }
                     }
                 } else {
-                    playerError = "Could not load this content."
+                    buffering = false
                 }
             }
         })

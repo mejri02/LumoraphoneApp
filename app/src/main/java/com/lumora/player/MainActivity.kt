@@ -80,18 +80,33 @@ class MainActivity : ComponentActivity() {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             window.attributes = lp
         }
+        AppContext.app = applicationContext
         Store.init(applicationContext)
         CatalogCache.init(applicationContext)
         TvLink.init()
         ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(PIP_ACTION), ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = Color(vm.accentInt()), onPrimary = Color.White, secondary = Color(vm.accentInt()),
+            val accent = Color(vm.accentInt())
+            val scheme = when (vm.themeIdx) {
+                1 -> darkColorScheme(
+                    primary = accent, onPrimary = Color.White, secondary = Color(0xFF64B5F6),
+                    background = Color(0xFF06111F), surface = Color(0xFF0B1B2D),
+                    onSurface = Color(0xFFE8F2FF), onBackground = Color(0xFFE8F2FF),
+                    surfaceVariant = Color(0xFF152B43), onSurfaceVariant = Color(0xFFB7CBE0)
+                )
+                2 -> lightColorScheme(
+                    primary = accent, onPrimary = Color.White, secondary = Color(0xFF52627A),
+                    background = Color(0xFFF7F8FC), surface = Color.White,
+                    onSurface = Color(0xFF202432), onBackground = Color(0xFF202432),
+                    surfaceVariant = Color(0xFFE9ECF4), onSurfaceVariant = Color(0xFF50586B)
+                )
+                else -> darkColorScheme(
+                    primary = accent, onPrimary = Color.White, secondary = accent,
                     background = Color(0xFF09090E), surface = Color(0xFF13131A),
                     onSurface = Color(0xFFEDEFF5), onBackground = Color(0xFFEDEFF5), surfaceVariant = Color(0xFF1D1D27)
                 )
-            ) {
+            }
+            MaterialTheme(colorScheme = scheme) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Root(vm) }
             }
         }
@@ -365,6 +380,17 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.changeCastOn(v) } }
             item { SettingHeader("Appearance") }
             item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Full UI theme", color = MaterialTheme.colorScheme.onSurface)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(selected = vm.themeIdx == 0, onClick = { vm.changeTheme(0) }, label = { Text("Original · Cinema Dark") })
+                        FilterChip(selected = vm.themeIdx == 1, onClick = { vm.changeTheme(1) }, label = { Text("Midnight Blue") })
+                        FilterChip(selected = vm.themeIdx == 2, onClick = { vm.changeTheme(2) }, label = { Text("Light Premium") })
+                    }
+                    Text("Changes the app background, cards and text colors. Your original theme remains available.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Accent color", Modifier.weight(1f))
                     vm.accents.forEachIndexed { i, c ->
@@ -375,6 +401,8 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                     }
                 }
             }
+            item { SettingHeader("Subtitles · OpenSubtitles") }
+            item { OpenSubtitlesApiSettings(vm) }
             item { SettingHeader("Downloads (offline)") }
             if (vm.downloads.isEmpty()) item { Text("No downloads yet. Open a movie or episode and tap Download.", color = Color.Gray, fontSize = 13.sp) }
             items(vm.downloads.toList()) { d -> DownloadRow(vm, d) }
@@ -393,6 +421,31 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
         }
     }
     if (pinDialog) PinDialog(vm) { pinDialog = false }
+}
+
+@Composable
+fun OpenSubtitlesApiSettings(vm: AppVM) {
+    var key by rememberSaveable { mutableStateOf(vm.subtitleApiKey) }
+    var showKey by rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("API key", fontWeight = FontWeight.SemiBold)
+        Text("Add your OpenSubtitles.com API key to enable subtitle search. It is encrypted on this device.", fontSize = 12.sp, color = Color.Gray)
+        OutlinedTextField(value = key, onValueChange = { key = it; vm.subtitleApiStatus = "" }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            label = { Text("OpenSubtitles API key") },
+            visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = { IconButton(onClick = { showKey = !showKey }) { Icon(if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (showKey) "Hide key" else "Show key") } })
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = showKey, onCheckedChange = { showKey = it })
+            Text("Show key", fontSize = 13.sp)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { vm.subtitleApiStatus = if (vm.saveSubtitleApiKey(key)) "API key saved on this device." else "Could not securely save the key." }, modifier = Modifier.weight(1f)) { Text("Save") }
+            OutlinedButton(enabled = key.isNotBlank() && !vm.subtitleApiTesting, onClick = { vm.testSubtitleApiKey(key) }, modifier = Modifier.weight(1f)) { Text(if (vm.subtitleApiTesting) "Testing…" else "Test connection") }
+        }
+        OutlinedButton(onClick = { key = ""; vm.saveSubtitleApiKey(""); vm.subtitleApiStatus = "API key removed from this device." }, modifier = Modifier.fillMaxWidth()) { Text("Remove key") }
+        if (vm.subtitleApiStatus.isNotBlank()) Text(vm.subtitleApiStatus, color = if (vm.subtitleApiStatus.startsWith("Connected") || vm.subtitleApiStatus.startsWith("API key saved")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+        TextButton(onClick = { vm.openOpenSubtitlesApiPage() }) { Text("Get an API key") }
+    }
 }
 
 @Composable

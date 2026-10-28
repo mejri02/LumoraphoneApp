@@ -37,3 +37,11 @@ If you encounter a problem, please report it through the repository's "Issues" (
 ---
 
 Lumora TV 1.5.0
+
+OpenSubtitles API key setup (Android):
+1. Open LumoraTV Settings.
+2. Find “Subtitles · OpenSubtitles”.
+3. Paste your OpenSubtitles.com API key, press Save, and optionally Test connection.
+4. In the player, open Subtitles to search and download captions.
+
+The API key is encrypted locally using Android Keystore (AES-GCM). This source archive intentionally excludes tv-app-source and phone-app-source; only Android project files are included.

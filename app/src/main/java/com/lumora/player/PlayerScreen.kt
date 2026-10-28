@@ -12,6 +12,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.viewModelScope
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.util.Locale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,6 +85,27 @@ fun PlayerPane(
     var dur by remember(req.url) { mutableLongStateOf(0L) }
     var drag by remember { mutableStateOf<Float?>(null) }
     var hint by remember { mutableStateOf("") }
+    var showSubtitles by remember { mutableStateOf(false) }
+    var subtitleFile by remember(req.url) { mutableStateOf<File?>(null) }
+    var subtitleOffset by remember(req.url) { mutableIntStateOf(0) }
+    var subtitleStatus by remember { mutableStateOf("") }
+    var subtitleQuery by remember(req.url) { mutableStateOf(req.title) }
+    var subtitleLang by remember { mutableStateOf("ar") }
+    var subtitleApiKey by remember { mutableStateOf(OpenSubtitlesApiKeyStore.read())}
+    var subtitleResults by remember { mutableStateOf<List<SubtitleResult>>(emptyList()) }
+    var subtitleBusy by remember { mutableStateOf(false) }
+    val subtitlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val file = File(ctx.cacheDir, "subtitle_${System.currentTimeMillis()}.srt")
+                ctx.contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } }
+                subtitleFile = file
+                subtitleOffset = 0
+                subtitleStatus = "Subtitle loaded: ${file.name}"
+                applySubtitleFile(exo, req.url, file, 0)
+            } catch (e: Exception) { subtitleStatus = "Could not read subtitle file: ${e.message ?: "unknown error"}" }
+        }
+    }
 
     LaunchedEffect(exo) {
         while (true) {
@@ -244,6 +278,7 @@ fun PlayerPane(
                         },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                     ) { Text(speed.toString().removeSuffix(".0") + "x", color = Color.White, fontSize = 13.sp) }
+                    if (!live) CtrlBtn(Icons.Default.Subtitles, "Subtitles", 40) { showSubtitles = true; show = true }
                     CtrlBtn(Icons.Default.AspectRatio, "Aspect", 40) {
                         resize = when (resize) {
                             AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -256,5 +291,141 @@ fun PlayerPane(
                 }
             }
         }
+
+        if (showSubtitles) AlertDialog(
+            onDismissRequest = { showSubtitles = false },
+            title = { Text("Subtitles") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Load a subtitle file from your phone, or search OpenSubtitles.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = { subtitlePicker.launch(arrayOf("text/*", "application/x-subrip", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.FolderOpen, null); Spacer(Modifier.width(8.dp)); Text("Choose subtitle file (.srt / .vtt)")
+                    }
+                    OutlinedTextField(value = subtitleQuery, onValueChange = { subtitleQuery = it }, label = { Text("Movie / episode title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Language", modifier = Modifier.padding(end = 8.dp))
+                        listOf("ar" to "Arabic", "fr" to "French", "en" to "English").forEach { (code, label) ->
+                            FilterChip(selected = subtitleLang == code, onClick = { subtitleLang = code }, label = { Text(label) }, modifier = Modifier.padding(end = 3.dp))
+                        }
+                    }
+                    Button(onClick = {
+                        if (subtitleApiKey.isBlank()) subtitleStatus = "Enter your OpenSubtitles API key to search online."
+                        else {
+                            subtitleBusy = true; subtitleStatus = "Searching subtitles…"
+                            vm.viewModelScope.launch {
+                                val result = withContext(Dispatchers.IO) { searchOpenSubtitles(subtitleQuery, subtitleLang, subtitleApiKey) }
+                                subtitleResults = result.first
+                                subtitleStatus = result.second
+                                subtitleBusy = false
+                            }
+                        }
+                    }, enabled = !subtitleBusy, modifier = Modifier.fillMaxWidth()) { Text(if (subtitleBusy) "Please wait…" else "Search online") }
+                    if (subtitleBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    subtitleResults.take(5).forEach { item ->
+                        OutlinedButton(onClick = {
+                            subtitleBusy = true; subtitleStatus = "Downloading ${item.label}…"
+                            vm.viewModelScope.launch {
+                                val result = withContext(Dispatchers.IO) { downloadOpenSubtitle(item.fileId, subtitleApiKey, ctx.cacheDir) }
+                                if (result.first != null) {
+                                    subtitleFile = result.first; subtitleOffset = 0
+                                    applySubtitleFile(exo, req.url, result.first!!, 0)
+                                    subtitleStatus = "Subtitle loaded: ${item.label}"
+                                } else subtitleStatus = result.second
+                                subtitleBusy = false
+                            }
+                        }, enabled = !subtitleBusy, modifier = Modifier.fillMaxWidth()) { Text("${item.label} · ${item.language}", maxLines = 2) }
+                    }
+                    if (subtitleFile != null) {
+                        Divider()
+                        Text("Sync: ${if (subtitleOffset > 0) "+" else ""}%.1f s".format(Locale.US, subtitleOffset / 1000.0))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedButton(onClick = { subtitleOffset -= 500; applySubtitleFile(exo, req.url, subtitleFile!!, subtitleOffset) }, modifier = Modifier.weight(1f)) { Text("−0.5 s") }
+                            OutlinedButton(onClick = { subtitleOffset += 500; applySubtitleFile(exo, req.url, subtitleFile!!, subtitleOffset) }, modifier = Modifier.weight(1f)) { Text("+0.5 s") }
+                            TextButton(onClick = { subtitleOffset = 0; applySubtitleFile(exo, req.url, subtitleFile!!, 0) }) { Text("Reset") }
+                        }
+                    }
+                    if (subtitleStatus.isNotBlank()) Text(subtitleStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    Text("Configure your API key in Settings → Subtitles. The key is encrypted on this device.", style = MaterialTheme.typography.labelSmall)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showSubtitles = false }) { Text("Done") } }
+        )
     }
+}
+
+
+private data class SubtitleResult(val fileId: Long, val label: String, val language: String)
+
+private fun applySubtitleFile(player: androidx.media3.exoplayer.ExoPlayer, videoUrl: String, original: File, offsetMs: Int) {
+    try {
+        val raw = original.readText(Charsets.UTF_8)
+        val shifted = shiftSubtitleTimestamps(raw, offsetMs)
+        val ext = original.extension.lowercase(Locale.ROOT)
+        val out = File(original.parentFile, "${original.nameWithoutExtension}_offset_${offsetMs}.${if (ext == "vtt") "vtt" else "srt"}")
+        out.writeText(shifted, Charsets.UTF_8)
+        val mime = if (ext == "vtt") "text/vtt" else "application/x-subrip"
+        val config = androidx.media3.common.MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(out))
+            .setMimeType(mime).setLanguage("und").setSelectionFlags(androidx.media3.common.C.SELECTION_FLAG_DEFAULT).build()
+        val item = androidx.media3.common.MediaItem.Builder().setUri(videoUrl).setSubtitleConfigurations(listOf(config)).build()
+        val position = player.currentPosition
+        val wasPlaying = player.isPlaying
+        player.replaceMediaItem(player.currentMediaItemIndex.coerceAtLeast(0), item)
+        player.seekTo(position)
+        player.playWhenReady = wasPlaying
+    } catch (_: Exception) { }
+}
+
+private fun shiftSubtitleTimestamps(text: String, offsetMs: Int): String {
+    val regex = Regex("(?m)(\\d{2}:\\d{2}:\\d{2}[,.]\\d{3})")
+    return regex.replace(text) { match ->
+        val parts = match.value.replace(',', '.').split(':')
+        val secParts = parts[2].split('.')
+        val millis = ((parts[0].toLong() * 3600 + parts[1].toLong() * 60 + secParts[0].toLong()) * 1000 + secParts[1].toLong() + offsetMs).coerceAtLeast(0L)
+        val h = millis / 3600000; val m = (millis % 3600000) / 60000; val sec = (millis % 60000) / 1000; val ms = millis % 1000
+        val separator = if (match.value.contains('.')) '.' else ','
+        "%02d:%02d:%02d%s%03d".format(h, m, sec, separator, ms)
+    }
+}
+
+private fun searchOpenSubtitles(title: String, language: String, apiKey: String): Pair<List<SubtitleResult>, String> {
+    return try {
+        val url = "https://api.opensubtitles.com/api/v1/subtitles?query=${java.net.URLEncoder.encode(title, "UTF-8")}&languages=$language"
+        val req = Request.Builder().url(url).header("Api-Key", apiKey).header("User-Agent", "LumoraTV v1.6.0").build()
+        val response = Net.client.newCall(req).execute()
+        response.use { r ->
+            if (!r.isSuccessful) return emptyList<SubtitleResult>() to "OpenSubtitles search failed (HTTP ${r.code}). Check API key or network."
+            val root = JSONObject(r.body?.string().orEmpty()); val data = root.optJSONArray("data") ?: JSONArray()
+            val results = mutableListOf<SubtitleResult>()
+            for (i in 0 until data.length()) {
+                val attrs = data.optJSONObject(i)?.optJSONObject("attributes") ?: continue
+                val files = attrs.optJSONArray("files") ?: continue
+                val fileId = files.optJSONObject(0)?.optLong("file_id", 0L) ?: 0L
+                if (fileId <= 0L) continue
+                val details = attrs.optJSONObject("feature_details")
+                val label = details?.optString("title")?.takeIf { !it.isNullOrBlank() } ?: title
+                results.add(SubtitleResult(fileId, label, attrs.optString("language", language)))
+            }
+            results to if (results.isEmpty()) "No subtitles found for this title and language." else "Found ${results.size} subtitle(s)."
+        }
+    } catch (e: Exception) { emptyList<SubtitleResult>() to "Search error: ${e.message ?: "network unavailable"}" }
+}
+
+private fun downloadOpenSubtitle(fileId: Long, apiKey: String, cacheDir: File): Pair<File?, String> {
+    return try {
+        val body = JSONObject().put("file_id", fileId).toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        val req = Request.Builder().url("https://api.opensubtitles.com/api/v1/download").header("Api-Key", apiKey).header("User-Agent", "LumoraTV v1.6.0").post(body).build()
+        val response = Net.client.newCall(req).execute()
+        response.use { r ->
+            if (!r.isSuccessful) return null to "Subtitle download request failed (HTTP ${r.code})."
+            val link = JSONObject(r.body?.string().orEmpty()).optString("link")
+            if (!link.startsWith("https://")) return null to "OpenSubtitles returned an invalid download link."
+            val dl = Net.client.newCall(Request.Builder().url(link).header("User-Agent", "LumoraTV v1.6.0").build()).execute()
+            dl.use { d ->
+                if (!d.isSuccessful) return null to "Could not download subtitle file (HTTP ${d.code})."
+                val bytes = d.body?.bytes() ?: return null to "Subtitle file was empty."
+                val file = File(cacheDir, "opensubtitles_${fileId}.srt"); file.writeBytes(bytes)
+                file to "Subtitle downloaded."
+            }
+        }
+    } catch (e: Exception) { null to "Download error: ${e.message ?: "network unavailable"}" }
 }
