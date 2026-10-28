@@ -80,7 +80,6 @@ class MainActivity : ComponentActivity() {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             window.attributes = lp
         }
-        AppContext.app = applicationContext
         Store.init(applicationContext)
         CatalogCache.init(applicationContext)
         TvLink.init()
