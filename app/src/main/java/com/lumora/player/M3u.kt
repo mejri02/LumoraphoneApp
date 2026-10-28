@@ -2,7 +2,6 @@ package com.lumora.player
 
 object M3u {
     private val attr = Regex("([\\w-]+)=\"([^\"]*)\"")
-    private val urlRe = Regex("^[a-zA-Z]+://\\S+$")
     private val file = Regex("\\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|mpg|mpeg|3gp)(\\?|$)", RegexOption.IGNORE_CASE)
 
     fun parse(text: String, srcId: String): Triple<List<Item>, List<Item>, List<Item>> {
@@ -26,7 +25,7 @@ object M3u {
                 logo = m["tvg-logo"] ?: ""
                 have = true
             } else if (!line.startsWith("#")) {
-                if (urlRe.matches(line)) {
+                if (MediaUrlValidator.isHttpUrl(line)) {
                     val isVod = line.contains("/movie/") || line.contains("/series/") || file.containsMatchIn(line)
                     val it = Item(
                         line, if (have) name else line, if (have) group else "Uncategorized",
