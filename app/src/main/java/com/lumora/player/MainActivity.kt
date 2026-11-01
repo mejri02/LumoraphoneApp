@@ -80,6 +80,16 @@ class MainActivity : ComponentActivity() {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             window.attributes = lp
         }
+        val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                java.io.File(filesDir, "crash.log").writeText(
+                    java.util.Date().toString() + " [" + t.name + "]\n" + android.util.Log.getStackTraceString(e)
+                )
+            } catch (_: Throwable) {
+            }
+            prevHandler?.uncaughtException(t, e)
+        }
         Store.init(applicationContext)
         CatalogCache.init(applicationContext)
         TvLink.init()

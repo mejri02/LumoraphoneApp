@@ -38,6 +38,29 @@ object Net {
         }
     }
 
+    /** Streams the response body to [block] without loading it all in memory (for huge catalogs). */
+    suspend fun <T> stream(url: String, readSec: Long = 60, block: (java.io.Reader) -> T): T = withContext(Dispatchers.IO) {
+        val req = try {
+            Request.Builder().url(url).header("User-Agent", UA).build()
+        } catch (e: IllegalArgumentException) {
+            throw IOException("Invalid URL")
+        }
+        val c = client.newBuilder().readTimeout(readSec, TimeUnit.SECONDS).build()
+        try {
+            c.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) throw IOException(httpMsg(r.code))
+                val body = r.body ?: throw IOException("Invalid response from server")
+                block(body.charStream().buffered(64 * 1024))
+            }
+        } catch (e: IOException) {
+            if (e.message?.startsWith("HTTP") == true || e.message?.contains("denied") == true ||
+                e.message?.contains("Not found") == true || e.message?.contains("Server error") == true ||
+                e.message == "Invalid response from server"
+            ) throw e
+            throw IOException("Network error")
+        }
+    }
+
     private fun httpMsg(code: Int): String = when {
         code == 401 || code == 403 -> "Access denied (HTTP $code)"
         code == 404 -> "Not found (HTTP $code)"

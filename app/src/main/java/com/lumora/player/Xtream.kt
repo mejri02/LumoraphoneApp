@@ -1,5 +1,7 @@
 package com.lumora.player
 
+import android.util.JsonReader
+import android.util.JsonToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -69,6 +71,32 @@ object Xtream {
         return (o.str("rating_5based").toDoubleOrNull() ?: 0.0) * 2.0
     }
 
+    /** Reads one JSON object from [r] as a flat map of scalar values (nested values are skipped). */
+    private fun readFlat(r: JsonReader, keep: Set<String>, into: HashMap<String, String>) {
+        into.clear()
+        r.beginObject()
+        while (r.hasNext()) {
+            val k = r.nextName()
+            if (k in keep) {
+                when (r.peek()) {
+                    JsonToken.NULL -> r.nextNull()
+                    JsonToken.BEGIN_ARRAY -> { // e.g. cover as array: keep first string only
+                        r.beginArray()
+                        var first = ""
+                        while (r.hasNext()) {
+                            if (first.isEmpty() && r.peek() == JsonToken.STRING) first = r.nextString() else r.skipValue()
+                        }
+                        r.endArray()
+                        into[k] = first.trim()
+                    }
+                    JsonToken.BEGIN_OBJECT -> r.skipValue()
+                    else -> into[k] = r.nextString().trim()
+                }
+            } else r.skipValue()
+        }
+        r.endObject()
+    }
+
     suspend fun catalog(s: Source, kind: String): List<Item> {
         val ca: String
         val da: String
@@ -79,43 +107,74 @@ object Xtream {
         }
         val cats = HashMap<String, String>()
         try {
-            val a = JSONArray(Net.text(api(s, ca), 60))
-            for (i in 0 until a.length()) {
-                val c = a.getJSONObject(i)
-                cats[c.str("category_id")] = c.str("category_name")
+            Net.stream(api(s, ca), 60) { rd ->
+                JsonReader(rd).use { r ->
+                    val m = HashMap<String, String>()
+                    val keep = setOf("category_id", "category_name")
+                    r.beginArray()
+                    while (r.hasNext()) {
+                        if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); continue }
+                        readFlat(r, keep, m)
+                        cats[m["category_id"].orEmpty()] = m["category_name"].orEmpty()
+                    }
+                    r.endArray()
+                }
             }
         } catch (_: Exception) {
         }
-        val raw = Net.text(api(s, da), 180)
-        return withContext(Dispatchers.Default) {
-            val arr = try {
-                JSONArray(raw.trim())
-            } catch (e: Exception) {
-                throw IOException("Invalid response from server")
-            }
-            val out = ArrayList<Item>(arr.length())
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
-                val group = cats[o.str("category_id")]?.ifBlank { null } ?: "Uncategorized"
-                val name = o.str("name").ifBlank { "Unknown" }
-                when (kind) {
-                    "live" -> out.add(Item(o.str("stream_id"), name, group, o.str("stream_icon"), "live", srcId = s.id, added = o.str("added").toLongOrNull() ?: 0L))
-                    "vod" -> out.add(
-                        Item(
-                            o.str("stream_id"), name, group, o.str("stream_icon"), "vod",
-                            ext = o.str("container_extension").ifBlank { "mp4" }, srcId = s.id,
-                            added = o.str("added").toLongOrNull() ?: 0L, rating = ratingOf(o)
-                        )
-                    )
-                    else -> out.add(
-                        Item(
-                            o.str("series_id"), name, group, o.str("cover"), "series", srcId = s.id,
-                            added = o.str("last_modified").toLongOrNull() ?: 0L, rating = ratingOf(o)
-                        )
-                    )
+        val keep = setOf(
+            "category_id", "name", "stream_id", "stream_icon", "added", "container_extension",
+            "rating", "rating_5based", "series_id", "cover", "last_modified"
+        )
+        return try {
+            Net.stream(api(s, da), 300) { rd ->
+                JsonReader(rd).use { r ->
+                    val out = ArrayList<Item>()
+                    val m = HashMap<String, String>()
+                    try {
+                        r.beginArray()
+                    } catch (e: Exception) {
+                        throw IOException("Invalid response from server")
+                    }
+                    while (r.hasNext()) {
+                        if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); continue }
+                        readFlat(r, keep, m)
+                        val group = cats[m["category_id"].orEmpty()]?.ifBlank { null } ?: "Uncategorized"
+                        val name = (m["name"] ?: "").ifBlank { "Unknown" }
+                        val rating = run {
+                            val a = m["rating"]?.toDoubleOrNull() ?: 0.0
+                            if (a > 0.0) a else (m["rating_5based"]?.toDoubleOrNull() ?: 0.0) * 2.0
+                        }
+                        when (kind) {
+                            "live" -> out.add(Item(m["stream_id"].orEmpty(), name, group, m["stream_icon"].orEmpty(), "live", srcId = s.id, added = m["added"]?.toLongOrNull() ?: 0L))
+                            "vod" -> out.add(
+                                Item(
+                                    m["stream_id"].orEmpty(), name, group, m["stream_icon"].orEmpty(), "vod",
+                                    ext = (m["container_extension"] ?: "").ifBlank { "mp4" }, srcId = s.id,
+                                    added = m["added"]?.toLongOrNull() ?: 0L, rating = rating
+                                )
+                            )
+                            else -> out.add(
+                                Item(
+                                    m["series_id"].orEmpty(), name, group, m["cover"].orEmpty(), "series", srcId = s.id,
+                                    added = m["last_modified"]?.toLongOrNull() ?: 0L, rating = rating
+                                )
+                            )
+                        }
+                    }
+                    r.endArray()
+                    out
                 }
             }
-            out
+        } catch (e: OutOfMemoryError) {
+            throw IOException("Playlist too large for this device's memory")
+        } catch (e: java.io.EOFException) {
+            throw IOException("Invalid response from server")
+        } catch (e: java.io.IOException) {
+            if (e.javaClass.name.contains("MalformedJson")) throw IOException("Invalid response from server")
+            throw e
+        } catch (e: IllegalStateException) {
+            throw IOException("Invalid response from server")
         }
     }
 

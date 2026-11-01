@@ -4,14 +4,16 @@ object M3u {
     private val attr = Regex("([\\w-]+)=\"([^\"]*)\"")
     private val file = Regex("\\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|mpg|mpeg|3gp)(\\?|$)", RegexOption.IGNORE_CASE)
 
-    fun parse(text: String, srcId: String): Triple<List<Item>, List<Item>, List<Item>> {
+    fun parse(text: String, srcId: String) = parse(text.lineSequence(), srcId)
+
+    fun parse(lines: Sequence<String>, srcId: String): Triple<List<Item>, List<Item>, List<Item>> {
         val live = ArrayList<Item>()
         val vod = ArrayList<Item>()
         var name = ""
         var group = "Uncategorized"
         var logo = ""
         var have = false
-        for (raw in text.lineSequence()) {
+        for (raw in lines) {
             val line = raw.trim()
             if (line.isEmpty()) continue
             if (line.startsWith("#EXTINF")) {

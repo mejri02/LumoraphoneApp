@@ -280,14 +280,15 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 if (force || !catalog.containsKey(kind) || stale(s, kind)) {
                     if (s.type == "xtream") {
                         val list = Xtream.catalog(s, kind)
-                        CatalogCache.write(sourceCacheKey(s), kind, list)
                         if (src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
                             catalog[kind] = list
                             updatedAt[kind] = System.currentTimeMillis()
                         }
+                        CatalogCache.write(sourceCacheKey(s), kind, list)
                     } else {
-                        val t = Net.text(s.url.trim(), 180)
-                        val r = M3u.parse(t, s.id)
+                        val r = Net.stream(s.url.trim(), 300) { rd ->
+                            M3u.parse(rd.buffered().lineSequence(), s.id)
+                        }
                         CatalogCache.write(sourceCacheKey(s), "live", r.first)
                         CatalogCache.write(sourceCacheKey(s), "vod", r.second)
                         CatalogCache.write(sourceCacheKey(s), "series", emptyList())
@@ -300,10 +301,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
                 if (src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
                     if (!catalog.containsKey(kind)) catalog[kind] = emptyList()
-                    if (force || (catalog[kind]?.isEmpty() != false)) message = e.message ?: "Network error"
+                    if (force || (catalog[kind]?.isEmpty() != false)) {
+                        message = if (e is OutOfMemoryError) "Playlist too large for this device's memory" else (e.message ?: "Network error")
+                    }
                 }
             }
             if (src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) loading[key] = false

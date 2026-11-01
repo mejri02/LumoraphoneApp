@@ -6,6 +6,8 @@ import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -29,6 +31,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 // ======================= HOME =======================
 
@@ -247,7 +252,7 @@ fun CatalogTab(vm: AppVM) {
         when {
             vm.src() == null -> EmptyState("No sources yet", "Open Settings and add a source")
             loading && all.isEmpty() -> Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            all.isEmpty() -> EmptyState("Nothing here yet", "Pull the refresh button to load this list")
+            all.isEmpty() -> EmptyState("Nothing here yet", "Could not load this list", "Retry") { vm.load(kind, true) }
             else -> {
                 val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp + nav)) {
@@ -349,11 +354,36 @@ fun SearchTab(vm: AppVM) {
     val live = vm.catalog["live"]
     val vod = vm.catalog["vod"]
     val ser = vm.catalog["series"]
-    val res = remember(q, live, vod, ser) {
-        val t = q.trim()
-        if (t.length < 2) emptyList()
-        else ((vod ?: emptyList()) + (ser ?: emptyList()) + (live ?: emptyList()))
-            .filter { it.name.contains(t, true) && !vm.locked(it.group) }.take(300)
+    var tab by remember { mutableStateOf("all") }
+    // Search keys are computed once per catalog, off the main thread.
+    val index by produceState<List<Triple<String, Item, String>>>(emptyList(), live, vod, ser) {
+        value = withContext(Dispatchers.Default) {
+            val out = ArrayList<Triple<String, Item, String>>()
+            for ((kind, list) in listOf("vod" to vod, "series" to ser, "live" to live))
+                list?.forEach { out.add(Triple(kind, it, searchKey(it.name))) }
+            out
+        }
+    }
+    // Wait 300 ms after the last keystroke before searching.
+    var dq by remember { mutableStateOf("") }
+    LaunchedEffect(q) { delay(300); dq = q }
+    val found by produceState<Map<String, List<Item>>>(emptyMap(), dq, index, vm.unlocked) {
+        val t = searchKey(dq)
+        value = if (t.length < 2) emptyMap() else withContext(Dispatchers.Default) {
+            index.filter { it.third.contains(t) && !vm.locked(it.second.group) }
+                .groupBy({ it.first }, { it.second })
+        }
+    }
+    val tabs = buildList {
+        add(Triple("all", "All", found.values.sumOf { it.size }))
+        add(Triple("vod", "Movies", found["vod"]?.size ?: 0))
+        add(Triple("series", "Series", found["series"]?.size ?: 0))
+        if ((found["live"]?.size ?: 0) > 0) add(Triple("live", "Live", found["live"]?.size ?: 0))
+    }
+    var limit by remember { mutableStateOf(300) }
+    LaunchedEffect(dq, tab) { limit = 300 }
+    val res = remember(found, tab, limit) {
+        (if (tab == "all") (found["vod"].orEmpty() + found["series"].orEmpty() + found["live"].orEmpty()) else found[tab].orEmpty()).take(limit)
     }
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -369,8 +399,56 @@ fun SearchTab(vm: AppVM) {
         )
         if (q.trim().length < 2) EmptyState("Search everything", "Type at least 2 letters")
         else {
-            SortPills(vm)
-            PosterGrid(vm, res, Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                tabs.forEach { (k, label, n) ->
+                    val sel = tab == k
+                    Column(Modifier.clickable { tab = k }.padding(vertical = 8.dp)) {
+                        Text(
+                            "$label ($n)", fontWeight = FontWeight.Bold,
+                            color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
+                        )
+                        Box(Modifier.padding(top = 4.dp).height(3.dp).fillMaxWidth().background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent))
+                    }
+                }
+            }
+            val total = if (tab == "all") found.values.sumOf { it.size } else found[tab]?.size ?: 0
+            if (res.isEmpty()) EmptyState("No results", "Try another word")
+            else {
+                val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp + nav), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(res, key = { it.key }) { it -> SearchRow(vm, it) }
+                    if (total > res.size) item {
+                        TextButton(onClick = { limit += 300 }, modifier = Modifier.fillMaxWidth()) { Text("Show more (${total - res.size})") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchRow(vm: AppVM, it: Item) {
+    val live = it.kind == "live"
+    Row(Modifier.fillMaxWidth().clickable { vm.open(it) }, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.width(if (live) 64.dp else 72.dp).aspectRatio(if (live) 1f else 2f / 3f)
+                .clip(RoundedCornerShape(12.dp)).background(Color(0xFF1A1A23))
+        ) {
+            if (it.logo.startsWith("http")) {
+                AsyncImage(
+                    model = it.logo, contentDescription = it.name, modifier = Modifier.fillMaxSize(),
+                    contentScale = if (live) ContentScale.Fit else ContentScale.Crop
+                )
+            } else {
+                Text(it.name.take(2).uppercase(), Modifier.align(Alignment.Center), color = Color.Gray, fontWeight = FontWeight.Bold)
+            }
+        }
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(it.name, maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                when (it.kind) { "vod" -> "Movie"; "series" -> "Series"; else -> "Live" },
+                color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)
+            )
         }
     }
 }

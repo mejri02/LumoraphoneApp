@@ -48,11 +48,15 @@ fun SectionHeader(title: String, action: String?, onAction: () -> Unit = {}) {
 }
 
 @Composable
-fun EmptyState(title: String, sub: String) {
+fun EmptyState(title: String, sub: String, actionLabel: String? = null, onAction: () -> Unit = {}) {
     Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         Text(sub, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center)
+        if (actionLabel != null) {
+            Spacer(Modifier.height(14.dp))
+            Button(onClick = onAction) { Text(actionLabel) }
+        }
     }
 }
 
