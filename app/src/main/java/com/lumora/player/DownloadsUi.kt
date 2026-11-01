@@ -77,7 +77,7 @@ fun MiniPlayer(vm: AppVM, modifier: Modifier = Modifier) {
 @Composable
 fun DownloadsScreen(vm: AppVM) {
     BackHandler { vm.showDownloads = false }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).blockTouches().statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().themeBackground().blockTouches().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.showDownloads = false }) { Icon(Icons.Default.ArrowBack, "Back") }
             Text("Downloads", Modifier.weight(1f), fontSize = 22.sp, fontWeight = FontWeight.Bold)

@@ -291,7 +291,7 @@ fun CategoryScreen(vm: AppVM, ref: GroupRef) {
         }
     }
     val title = if (ref.name.isEmpty()) when (ref.kind) { "live" -> "All channels"; "vod" -> "All movies"; else -> "All series" } else ref.name
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).blockTouches().statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().themeBackground().blockTouches().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.openGroup = null }) { Icon(Icons.Default.ArrowBack, "Back") }
             Column(Modifier.weight(1f)) {

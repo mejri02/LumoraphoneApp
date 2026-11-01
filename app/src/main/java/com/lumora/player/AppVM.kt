@@ -103,7 +103,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var unlocked by mutableStateOf(false)
     var accentIdx by mutableStateOf(Store.getString("accent", "0").toIntOrNull() ?: 0)
     // Full UI theme; index 0 preserves the original Lumora appearance.
-    var themeIdx by mutableStateOf(Store.getString("uiTheme", "0").toIntOrNull()?.coerceIn(0, 2) ?: 0)
+    var themeIdx by mutableStateOf(Store.getString("uiTheme", "0").toIntOrNull()?.coerceIn(0, THEME_COUNT - 1) ?: 0)
     var castOn by mutableStateOf(Store.getBool("castOn", true))
 
     // ---------- player state: lives here so playback keeps going when minimized or in picture-in-picture ----------
@@ -144,7 +144,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun changeTheme(i: Int) {
-        themeIdx = i.coerceIn(0, 2)
+        themeIdx = i.coerceIn(0, THEME_COUNT - 1)
         Store.putString("uiTheme", themeIdx.toString())
     }
 

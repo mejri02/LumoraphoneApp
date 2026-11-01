@@ -115,8 +115,11 @@ class MainActivity : ComponentActivity() {
                     onSurface = Color(0xFFEDEFF5), onBackground = Color(0xFFEDEFF5), surfaceVariant = Color(0xFF1D1D27)
                 )
             }
-            MaterialTheme(colorScheme = scheme) {
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Root(vm) }
+            val spec = IMAGE_THEMES.getOrNull(vm.themeIdx - BASE_THEMES)
+            CompositionLocalProvider(LocalThemeSpec provides spec) {
+                MaterialTheme(colorScheme = spec?.scheme ?: scheme) {
+                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Root(vm) }
+                }
             }
         }
     }
@@ -197,7 +200,7 @@ class MainActivity : ComponentActivity() {
 fun TopBar(vm: AppVM, onRemote: () -> Unit, onCast: () -> Unit, onDownloads: () -> Unit) {
     val primary = MaterialTheme.colorScheme.primary
     Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).statusBarsPadding()
+        Modifier.fillMaxWidth().background(if (LocalThemeSpec.current?.img != null) Color.Transparent else MaterialTheme.colorScheme.background).statusBarsPadding()
             .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -259,11 +262,13 @@ fun Root(vm: AppVM) {
     }
 
     Box(Modifier.fillMaxSize()) {
+        val themed = LocalThemeSpec.current?.img != null
         Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
+            modifier = Modifier.themeBackground(),
+            containerColor = if (themed) Color.Transparent else MaterialTheme.colorScheme.background,
             topBar = { TopBar(vm, onRemote = { remoteSheet = true }, onCast = { castSheet = true }, onDownloads = { vm.showDownloads = true }) },
             bottomBar = {
-                NavigationBar(containerColor = Color(0xFF0F0F15)) {
+                NavigationBar(containerColor = if (themed) MaterialTheme.colorScheme.surface.copy(alpha = 0.92f) else Color(0xFF0F0F15)) {
                     val navItems = listOf(
                         Triple("Home", Icons.Default.Home, 0), Triple("Catalog", Icons.Default.VideoLibrary, 1),
                         Triple("Favorites", Icons.Default.Star, 2), Triple("Search", Icons.Default.Search, 3)
@@ -329,7 +334,7 @@ fun ItemActions(vm: AppVM, item: Item) {
 fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
     var pinDialog by remember { mutableStateOf(false) }
     BackHandler { vm.showSettings = false }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).blockTouches().statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().themeBackground().blockTouches().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.showSettings = false }) { Icon(Icons.Default.ArrowBack, "Back") }
             Text("Settings", fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -416,6 +421,9 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                         FilterChip(selected = vm.themeIdx == 0, onClick = { vm.changeTheme(0) }, label = { Text("Original · Cinema Dark") })
                         FilterChip(selected = vm.themeIdx == 1, onClick = { vm.changeTheme(1) }, label = { Text("Midnight Blue") })
                         FilterChip(selected = vm.themeIdx == 2, onClick = { vm.changeTheme(2) }, label = { Text("Light Premium") })
+                        IMAGE_THEMES.forEachIndexed { i, t ->
+                            FilterChip(selected = vm.themeIdx == BASE_THEMES + i, onClick = { vm.changeTheme(BASE_THEMES + i) }, label = { Text(t.name) })
+                        }
                     }
                     Text("Changes the app background, cards and text colors. Your original theme remains available.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

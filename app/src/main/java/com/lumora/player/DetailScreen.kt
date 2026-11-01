@@ -87,7 +87,7 @@ fun DetailScreen(vm: AppVM, item: Item) {
         if (full) toggleFull() else if (req != null) vm.minimize() else vm.closeDetail()
     }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).blockTouches()) {
+    Box(Modifier.fillMaxSize().themeBackground().blockTouches()) {
         if (vm.pip && req != null) {
             PlayerPane(vm, req, full = true, pip = true, onToggleFull = {}, onBack = {}, modifier = Modifier.fillMaxSize())
         } else {
