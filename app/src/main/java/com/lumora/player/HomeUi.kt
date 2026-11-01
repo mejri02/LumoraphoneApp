@@ -440,14 +440,14 @@ private fun SearchRow(vm: AppVM, it: Item) {
                     contentScale = if (live) ContentScale.Fit else ContentScale.Crop
                 )
             } else {
-                Text(it.name.take(2).uppercase(), Modifier.align(Alignment.Center), color = Color.Gray, fontWeight = FontWeight.Bold)
+                Text(it.name.take(2).uppercase(), Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
             }
         }
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
             Text(it.name, maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 when (it.kind) { "vod" -> "Movie"; "series" -> "Series"; else -> "Live" },
-                color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)
             )
         }
     }

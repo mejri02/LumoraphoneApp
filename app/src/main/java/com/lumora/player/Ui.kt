@@ -52,7 +52,7 @@ fun EmptyState(title: String, sub: String, actionLabel: String? = null, onAction
     Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
-        Text(sub, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center)
+        Text(sub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         if (actionLabel != null) {
             Spacer(Modifier.height(14.dp))
             Button(onClick = onAction) { Text(actionLabel) }
@@ -86,7 +86,7 @@ fun PosterCard(
             } else {
                 Text(
                     item.name.take(2).uppercase(), Modifier.align(Alignment.Center),
-                    color = Color.Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 22.sp, fontWeight = FontWeight.Bold
                 )
             }
             if (!live && item.rating > 0.0) {

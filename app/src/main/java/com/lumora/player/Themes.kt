@@ -41,11 +41,11 @@ private fun imageTheme(
 
 /** Index 0..2 are the original themes (built in MainActivity); 3.. are the image themes below. */
 val IMAGE_THEMES: List<ThemeSpec> = listOf(
-    imageTheme("Blue Sky", R.drawable.theme_bg_1, 0.62f, 0xFF3B9CFF, 0xFF08182E, 0xFF0E2744, 0xFF16365C, 0x99),
-    imageTheme("Upside-Down Sky", R.drawable.theme_bg_2, 0.55f, 0xFFFFA45C, 0xFF0A1030, 0xFF141C45, 0xFF1E2A5E, 0x99),
-    imageTheme("Violet Street", R.drawable.theme_bg_3, 0.55f, 0xFFA569FF, 0xFF14121F, 0xFF1F1B30, 0xFF2B2542),
-    imageTheme("Neon City", R.drawable.theme_bg_4, 0.40f, 0xFFFF3DA8, 0xFF0B0617, 0xFF170C2B, 0xFF251442),
-    imageTheme("Dusk Rooftop", R.drawable.theme_bg_5, 0.52f, 0xFFFF9F8A, 0xFF0A1236, 0xFF121C4A, 0xFF1C2A63, 0x99),
+    imageTheme("Blue Sky", R.drawable.theme_bg_1, 0.5f, 0xFF3B9CFF, 0xFF08182E, 0xFF0E2744, 0xFF16365C, 0x99),
+    imageTheme("Upside-Down Sky", R.drawable.theme_bg_2, 0.5f, 0xFFFFA45C, 0xFF0A1030, 0xFF141C45, 0xFF1E2A5E, 0x99),
+    imageTheme("Violet Street", R.drawable.theme_bg_3, 0.5f, 0xFFA569FF, 0xFF14121F, 0xFF1F1B30, 0xFF2B2542),
+    imageTheme("Neon City", R.drawable.theme_bg_4, 0.5f, 0xFFFF3DA8, 0xFF0B0617, 0xFF170C2B, 0xFF251442),
+    imageTheme("Dusk Rooftop", R.drawable.theme_bg_5, 0.5f, 0xFFFF9F8A, 0xFF0A1236, 0xFF121C4A, 0xFF1C2A63, 0x99),
     imageTheme("Naruto · Sage Gold", R.drawable.theme_bg_6, 0.5f, 0xFFFFB300, 0xFF0F0A06, 0xFF1D140A, 0xFF2C1E0F),
     imageTheme("Naruto · Rasengan", R.drawable.theme_bg_7, 0.5f, 0xFFFF8A00, 0xFF0E1A22, 0xFF18262F, 0xFF22343F, 0xB3)
 )

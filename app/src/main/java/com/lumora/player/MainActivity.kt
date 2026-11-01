@@ -30,6 +30,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -268,7 +271,7 @@ fun Root(vm: AppVM) {
             containerColor = if (themed) Color.Transparent else MaterialTheme.colorScheme.background,
             topBar = { TopBar(vm, onRemote = { remoteSheet = true }, onCast = { castSheet = true }, onDownloads = { vm.showDownloads = true }) },
             bottomBar = {
-                NavigationBar(containerColor = if (themed) MaterialTheme.colorScheme.surface.copy(alpha = 0.92f) else Color(0xFF0F0F15)) {
+                NavigationBar(containerColor = if (themed) MaterialTheme.colorScheme.surface.copy(alpha = 0.92f) else if (vm.themeIdx == 0) Color(0xFF0F0F15) else MaterialTheme.colorScheme.surface) {
                     val navItems = listOf(
                         Triple("Home", Icons.Default.Home, 0), Triple("Catalog", Icons.Default.VideoLibrary, 1),
                         Triple("Favorites", Icons.Default.Star, 2), Triple("Search", Icons.Default.Search, 3)
@@ -333,6 +336,11 @@ fun ItemActions(vm: AppVM, item: Item) {
 @Composable
 fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
     var pinDialog by remember { mutableStateOf(false) }
+    var sourcesOpen by rememberSaveable { mutableStateOf(false) }
+    var themesOpen by rememberSaveable { mutableStateOf(false) }
+    var listsOpen by rememberSaveable { mutableStateOf(false) }
+    var browseOpen by rememberSaveable { mutableStateOf(false) }
+    var playOpen by rememberSaveable { mutableStateOf(false) }
     BackHandler { vm.showSettings = false }
     Column(Modifier.fillMaxSize().themeBackground().blockTouches().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -344,8 +352,11 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            item { SettingHeader("Sources") }
-            items(vm.sources.toList()) { s ->
+            item {
+                val active = vm.sources.firstOrNull { it.id == vm.activeSrc }
+                CollapseHeader("Sources", active?.let { it.name.ifBlank { it.url } } ?: "No source", sourcesOpen) { sourcesOpen = !sourcesOpen }
+            }
+            if (sourcesOpen) items(vm.sources.toList()) { s ->
                 val on = s.id == vm.activeSrc
                 LaunchedEffect(s.id, s.url, s.user, s.pass, s.type) {
                     if (on) vm.refreshAccountInfo(s, force = true)
@@ -360,13 +371,13 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                 }
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                        .background(if (on) Color(0xFF2A1520) else MaterialTheme.colorScheme.surfaceVariant)
+                        .background(MaterialTheme.colorScheme.surfaceVariant).background(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.Transparent)
                         .clickable { vm.selectSource(s.id) }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(s.name.ifBlank { s.url }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(s.type.uppercase() + (if (on) " · active" else ""), fontSize = 12.sp, color = Color.Gray)
+                        Text(s.type.uppercase() + (if (on) " · active" else ""), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (on && s.type == "xtream") {
                             Text(
                                 vm.accountExpiry[expiryKey] ?: "Subscription info not loaded",
@@ -374,7 +385,7 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                                 color = if ((vm.accountExpiry[expiryKey] ?: "").startsWith("Expired")) Color(0xFFFF6B6B) else Color.Gray
                             )
                             vm.accountStatus[expiryKey]?.let { status ->
-                                Text("Status: $status", fontSize = 12.sp, color = Color.Gray)
+                                Text("Status: $status", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -382,16 +393,18 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                     IconButton(onClick = { onEdit(s) }) { Icon(Icons.Default.Edit, "Edit") }
                 }
             }
-            item {
+            if (sourcesOpen) item {
                 Button(
                     onClick = { onEdit(Source("s" + System.currentTimeMillis().toString(36), "", "xtream", "")) },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("+ Add source") }
             }
-            item { SettingHeader("Lists (saved on this phone)") }
             item {
+                CollapseHeader("Lists", "Saved on this phone · " + (if (vm.refreshHours == 0) "manual refresh" else "refresh every ${vm.refreshHours} h"), listsOpen) { listsOpen = !listsOpen }
+            }
+            if (listsOpen) item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Refresh automatically", color = Color(0xFFC9CCD6))
+                    Text("Refresh automatically", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(listOf(0 to "Manual", 3 to "3 h", 6 to "6 h", 12 to "12 h", 24 to "24 h")) { (h, label) ->
                             FilterChip(vm.refreshHours == h, { vm.changeRefresh(h) }, { Text(label) })
@@ -399,10 +412,12 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                     }
                 }
             }
-            item { ActionRow("Update lists now", "Download channels, movies and series again") { vm.refreshAll() } }
-            item { ActionRow("Clear saved lists", "Frees space. Lists are downloaded again when needed") { vm.clearCache() } }
-            item { SettingHeader("Browsing") }
+            if (listsOpen) item { ActionRow("Update lists now", "Download channels, movies and series again") { vm.refreshAll() } }
+            if (listsOpen) item { ActionRow("Clear saved lists", "Frees space. Lists are downloaded again when needed") { vm.clearCache() } }
             item {
+                CollapseHeader("Browsing", if (vm.sort == "az") "Categories A-Z" else "Categories by most items", browseOpen) { browseOpen = !browseOpen }
+            }
+            if (browseOpen) item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Sort categories", Modifier.weight(1f))
                     FilterChip(vm.sort == "count", { vm.changeSort("count") }, { Text("Most items") })
@@ -410,25 +425,32 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                     FilterChip(vm.sort == "az", { vm.changeSort("az") }, { Text("A-Z") })
                 }
             }
-            item { SettingHeader("Playback") }
-            item { SwitchRow("Resume where I stopped", vm.resumeOn) { v -> vm.setResume(v) } }
-            item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.changeCastOn(v) } }
-            item { SettingHeader("Appearance") }
             item {
+                CollapseHeader("Playback", (if (vm.resumeOn) "Resume on" else "Resume off") + " · " + (if (vm.castOn) "TV cast on" else "TV cast off"), playOpen) { playOpen = !playOpen }
+            }
+            if (playOpen) item { SwitchRow("Resume where I stopped", vm.resumeOn) { v -> vm.setResume(v) } }
+            if (playOpen) item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.changeCastOn(v) } }
+            item {
+                val cur = when (vm.themeIdx) {
+                    0 -> "Original · Cinema Dark"; 1 -> "Midnight Blue"; 2 -> "Light Premium"
+                    else -> IMAGE_THEMES.getOrNull(vm.themeIdx - BASE_THEMES)?.name ?: ""
+                }
+                CollapseHeader("Themes", cur, themesOpen) { themesOpen = !themesOpen }
+            }
+            if (themesOpen) item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Full UI theme", color = MaterialTheme.colorScheme.onSurface)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(selected = vm.themeIdx == 0, onClick = { vm.changeTheme(0) }, label = { Text("Original · Cinema Dark") })
-                        FilterChip(selected = vm.themeIdx == 1, onClick = { vm.changeTheme(1) }, label = { Text("Midnight Blue") })
-                        FilterChip(selected = vm.themeIdx == 2, onClick = { vm.changeTheme(2) }, label = { Text("Light Premium") })
-                        IMAGE_THEMES.forEachIndexed { i, t ->
-                            FilterChip(selected = vm.themeIdx == BASE_THEMES + i, onClick = { vm.changeTheme(BASE_THEMES + i) }, label = { Text(t.name) })
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        item { ThemeThumb("Cinema Dark", null, Color(0xFF09090E), vm.themeIdx == 0) { vm.changeTheme(0) } }
+                        item { ThemeThumb("Midnight Blue", null, Color(0xFF06111F), vm.themeIdx == 1) { vm.changeTheme(1) } }
+                        item { ThemeThumb("Light Premium", null, Color(0xFFF7F8FC), vm.themeIdx == 2) { vm.changeTheme(2) } }
+                        itemsIndexed(IMAGE_THEMES) { i, t ->
+                            ThemeThumb(t.name, t.img, t.scheme.background, vm.themeIdx == BASE_THEMES + i) { vm.changeTheme(BASE_THEMES + i) }
                         }
                     }
                     Text("Changes the app background, cards and text colors. Your original theme remains available.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            item {
+            if (themesOpen) item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Accent color", Modifier.weight(1f))
                     vm.accents.forEachIndexed { i, c ->
@@ -440,9 +462,9 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                 }
             }
             item { SettingHeader("Subtitles") }
-            item { Text("Load subtitle files (.srt or .vtt) directly from the player. No API key or online account is needed.", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(4.dp)) }
+            item { Text("Load subtitle files (.srt or .vtt) directly from the player. No API key or online account is needed.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, modifier = Modifier.padding(4.dp)) }
             item { SettingHeader("Downloads (offline)") }
-            if (vm.downloads.isEmpty()) item { Text("No downloads yet. Open a movie or episode and tap Download.", color = Color.Gray, fontSize = 13.sp) }
+            if (vm.downloads.isEmpty()) item { Text("No downloads yet. Open a movie or episode and tap Download.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
             items(vm.downloads.toList()) { d -> DownloadRow(vm, d) }
             item { SettingHeader("Parental control") }
             item {
@@ -455,10 +477,49 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             item { ActionRow("Clear continue watching", "Removes saved progress") { vm.clearProgress() } }
             item { ActionRow("Clear favorites", "Removes all favorites") { vm.clearFavs() } }
             item { SettingHeader("About") }
-            item { Text("Lumora 1.6.0", color = Color.Gray, modifier = Modifier.padding(4.dp)) }
+            item { Text("Lumora 1.6.0", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(4.dp)) }
         }
     }
     if (pinDialog) PinDialog(vm) { pinDialog = false }
+}
+
+/** Small preview card for a theme: its picture (or plain color) with the name under it. */
+@Composable
+fun ThemeThumb(name: String, img: Int?, color: Color, selected: Boolean, onClick: () -> Unit) {
+    val border = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
+    Column(Modifier.width(84.dp).clickable { onClick() }, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(0.62f).clip(RoundedCornerShape(12.dp)).background(color)
+                .border(3.dp, border, RoundedCornerShape(12.dp))
+        ) {
+            if (img != null) {
+                androidx.compose.foundation.Image(
+                    painterResource(img), name, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            }
+        }
+        Text(
+            name, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+/** Tappable section header that expands or collapses its content. */
+@Composable
+fun CollapseHeader(title: String, summary: String, open: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant).clickable { onToggle() }.padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            if (summary.isNotBlank()) Text(summary, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+    }
 }
 
 @Composable
@@ -484,7 +545,7 @@ fun ActionRow(title: String, sub: String, onClick: () -> Unit) {
             .clickable { onClick() }.padding(14.dp)
     ) {
         Text(title)
-        Text(sub, fontSize = 12.sp, color = Color.Gray)
+        Text(sub, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -526,7 +587,7 @@ fun PinUnlock(vm: AppVM, onOk: () -> Unit, close: () -> Unit) {
         title = { Text("Adult category") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Enter your PIN to open this category", fontSize = 13.sp, color = Color.Gray)
+                Text("Enter your PIN to open this category", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(
                     value = p,
                     onValueChange = { v -> p = v.take(4) },
@@ -682,12 +743,12 @@ fun CastSheet(vm: AppVM, close: () -> Unit) {
                 Text(
                     if (vm.castOn) "Movies and channels you open are sent to the TV."
                     else "Cast is off. Everything plays on this phone. You can still cast from the player.",
-                    fontSize = 12.sp, color = Color.Gray
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 tvs.forEach { t ->
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                            .background(if (t.active) Color(0xFF2A1520) else Color(0xFF1C1C22))
+                            .background(MaterialTheme.colorScheme.surfaceVariant).background(if (t.active) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.Transparent)
                             .clickable { TvLink.select(t.id) }.padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -712,7 +773,7 @@ fun CastSheet(vm: AppVM, close: () -> Unit) {
                     Spacer(Modifier.width(8.dp))
                     Text("Pair with QR code")
                 }
-                Text("or enter the code manually", fontSize = 12.sp, color = Color.Gray)
+                Text("or enter the code manually", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(code, { code = it }, label = { Text("TV code") }, singleLine = true, placeholder = { Text("a3cc-db44-0851-2719") })
                 OutlinedTextField(nm, { nm = it }, label = { Text("TV name (optional)") }, singleLine = true)
                 OutlinedButton(onClick = {
@@ -736,7 +797,7 @@ fun RemoteSheet(close: () -> Unit) {
         title = { Text(if (tv == null) "Remote" else "Remote · " + tv.name) },
         text = {
             if (tv == null) {
-                Text("Link a TV first.", color = Color.Gray)
+                Text("Link a TV first.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Column {
                     Text(
@@ -758,7 +819,7 @@ fun Remote(tv: TvLink.TvView) {
     val st = tv.status
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         val title = st?.optString("title").orEmpty()
-        if (title.isNotEmpty()) Text("▶ $title", fontSize = 12.sp, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (title.isNotEmpty()) Text("▶ $title", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Row { RB("▲") { key("up") } }
         Row { RB("◀") { key("left") }; RB("OK") { key("ok") }; RB("▶") { key("right") } }
         Row { RB("▼") { key("down") } }
