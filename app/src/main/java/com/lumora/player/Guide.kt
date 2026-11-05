@@ -40,7 +40,7 @@ private fun parseXmlTvTime(raw: String): Long {
     for (pattern in listOf("yyyyMMddHHmmss Z", "yyyyMMddHHmmss")) {
         try {
             val fmt = SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
-            if (pattern == "yyyyMMddHHmmss") timeZone = TimeZone.getTimeZone("UTC")
+            if (pattern == "yyyyMMddHHmmss") fmt.timeZone = TimeZone.getTimeZone("UTC")
             return fmt.parse(raw.trim())?.time ?: 0L
         } catch (_: Exception) { }
     }
