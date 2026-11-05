@@ -274,7 +274,8 @@ fun Root(vm: AppVM) {
                 NavigationBar(containerColor = if (themed) MaterialTheme.colorScheme.surface.copy(alpha = 0.92f) else if (vm.themeIdx == 0) Color(0xFF0F0F15) else MaterialTheme.colorScheme.surface) {
                     val navItems = listOf(
                         Triple("Home", Icons.Default.Home, 0), Triple("Catalog", Icons.Default.VideoLibrary, 1),
-                        Triple("Favorites", Icons.Default.Star, 2), Triple("Search", Icons.Default.Search, 3)
+                        Triple("Favorites", Icons.Default.Star, 2), Triple("Search", Icons.Default.Search, 3),
+                        Triple("Guide", Icons.Default.Tv, 4)
                     )
                     navItems.forEach { (label, icon, i) ->
                         NavigationBarItem(
@@ -290,7 +291,8 @@ fun Root(vm: AppVM) {
                     0 -> HomeTab(vm, onSeeAll = { tab = 1 }, onAddSource = { vm.showSettings = true })
                     1 -> CatalogTab(vm)
                     2 -> FavoritesTab(vm)
-                    else -> SearchTab(vm)
+                    3 -> SearchTab(vm)
+                    else -> GuideTab()
                 }
             }
         }
