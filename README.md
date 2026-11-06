@@ -47,8 +47,9 @@ Lumora gives you a clean, fast interface for managing your own IPTV sources and 
 **Parental controls**
 - Adult categories can be locked behind a 4-digit PIN.
 
-**Phone and TV together**
-- The phone app can send playback to the Lumora TV app over the same Wi-Fi network.
+**Cast to Samsung TV**
+- Send playback from your phone to the Lumora app on a Samsung TV (Tizen) over the same Wi-Fi network.
+- Casting works only with the Samsung Tizen TV app. It is not available for other TV brands or Android TV.
 
 **Settings and data**
 - Back button navigates through screens, sheets, and dialogs.
