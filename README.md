@@ -11,16 +11,20 @@ Lumora gives you a clean, fast interface for managing your own IPTV sources and 
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/catalog-movies.jpg" alt="Movie catalog" width="180">
-  <img src="docs/screenshots/downloads-empty.jpg" alt="Downloads screen" width="180">
-  <img src="docs/screenshots/settings-blue-sky.jpg" alt="Blue Sky theme" width="180">
-  <img src="docs/screenshots/settings-dusk-rooftop.jpg" alt="Dusk Rooftop theme" width="180">
+  <img src="docs/screenshots/catalog-movies.jpg" alt="Movie catalog" width="49%">
+  <img src="docs/screenshots/downloads-empty.jpg" alt="Downloads screen" width="49%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/settings-naruto-theme.jpg" alt="Naruto theme" width="180">
-  <img src="docs/screenshots/settings-neon-city.jpg" alt="Neon City theme" width="180">
-  <img src="docs/screenshots/settings-upside-down-theme.jpg" alt="Upside Down theme" width="180">
-  <img src="docs/screenshots/settings-violet-street.jpg" alt="Violet Street theme" width="180">
+  <img src="docs/screenshots/settings-blue-sky.jpg" alt="Blue Sky theme" width="49%">
+  <img src="docs/screenshots/settings-dusk-rooftop.jpg" alt="Dusk Rooftop theme" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/settings-naruto-theme.jpg" alt="Naruto theme" width="49%">
+  <img src="docs/screenshots/settings-neon-city.jpg" alt="Neon City theme" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/settings-upside-down-theme.jpg" alt="Upside Down theme" width="49%">
+  <img src="docs/screenshots/settings-violet-street.jpg" alt="Violet Street theme" width="49%">
 </p>
 
 ## Features
