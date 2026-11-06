@@ -8,6 +8,13 @@ A modern IPTV player for Android, Android TV, and Samsung Tizen TVs, with a comp
 
 Lumora gives you a clean, fast interface for managing your own IPTV sources and watching live TV, movies, and series from your provider. It does not provide, host, or distribute any channels, movies, or subscriptions.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/catalog-movies.jpg" width="240">
+  <img src="docs/screenshots/downloads-empty.jpg" width="240">
+</p>
+
 ## Features
 
 **Sources**
