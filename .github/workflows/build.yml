@@ -2,7 +2,13 @@ name: Build Android APK and AAB
 
 on:
   push:
+    paths-ignore:
+      - 'README.md'
+      - 'docs/screenshots/**'
   pull_request:
+    paths-ignore:
+      - 'README.md'
+      - 'docs/screenshots/**'
   workflow_dispatch:
 
 jobs:
