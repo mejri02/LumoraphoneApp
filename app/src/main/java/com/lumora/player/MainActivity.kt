@@ -658,12 +658,14 @@ fun SourceForm(vm: AppVM, start: Source, close: () -> Unit) {
     var user by remember { mutableStateOf(start.user) }
     var pass by remember { mutableStateOf(start.pass) }
     var format by remember { mutableStateOf(start.format) }
+    var mac by remember { mutableStateOf(start.mac) }
+    var proxy by remember { mutableStateOf(start.proxy.ifBlank { Stalker.DEFAULT_PROXY }) }
     var menu by remember { mutableStateOf(false) }
     var testing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf("") }
     val exists = vm.sources.any { it.id == start.id }
 
-    fun build() = Source(start.id, name.trim().ifBlank { url.trim() }, type, url.trim(), user.trim(), pass.trim(), format)
+    fun build() = Source(start.id, name.trim().ifBlank { url.trim() }, type, url.trim(), user.trim(), pass.trim(), format, mac.trim(), proxy.trim())
 
     AlertDialog(
         onDismissRequest = close,
@@ -672,15 +674,20 @@ fun SourceForm(vm: AppVM, start: Source, close: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box {
                     OutlinedButton(onClick = { menu = true }, Modifier.fillMaxWidth()) {
-                        Text(if (type == "xtream") "Xtream Codes" else "M3U playlist URL")
+                        Text(when (type) { "xtream" -> "Xtream Codes"; "stalker" -> "Stalker Portal"; else -> "M3U playlist URL" })
                     }
                     DropdownMenu(menu, { menu = false }) {
                         DropdownMenuItem(text = { Text("Xtream Codes") }, onClick = { type = "xtream"; menu = false })
                         DropdownMenuItem(text = { Text("M3U playlist URL") }, onClick = { type = "m3u"; menu = false })
+                        DropdownMenuItem(text = { Text("Stalker Portal") }, onClick = { type = "stalker"; menu = false })
                     }
                 }
                 OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(url, { url = it }, label = { Text(if (type == "xtream") "Server URL" else "Playlist URL") }, singleLine = true)
+                OutlinedTextField(url, { url = it }, label = { Text(if (type == "m3u") "Playlist URL" else if (type == "stalker") "Portal URL" else "Server URL") }, singleLine = true)
+                if (type == "stalker") {
+                    OutlinedTextField(mac, { mac = it }, label = { Text("MAC address") }, singleLine = true)
+                    OutlinedTextField(proxy, { proxy = it }, label = { Text("Cloudflare Cookie proxy URL") }, singleLine = true)
+                }
                 if (type == "xtream") {
                     OutlinedTextField(user, { user = it }, label = { Text("Username") }, singleLine = true)
                     OutlinedTextField(

@@ -162,7 +162,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     private fun sourceCacheKey(s: Source): String {
         // Include credentials in cache identity so an edited Xtream account never sees old lists.
-        val raw = "${s.type}|${s.url.trim().trimEnd('/')}|${s.user.trim()}|${s.pass}|${s.format}"
+        val raw = "${s.type}|${s.url.trim().trimEnd('/')}|${s.user.trim()}|${s.pass}|${s.format}|${s.mac}|${s.proxy}"
         val digest = java.security.MessageDigest.getInstance("SHA-256")
             .digest(raw.toByteArray(Charsets.UTF_8))
             .take(12).joinToString("") { "%02x".format(it) }
@@ -248,6 +248,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             try {
                 if (s.type == "xtream") {
                     Xtream.login(s)
+                } else if (s.type == "stalker") {
+                    Stalker.login(s)
                 } else {
                     val t = Net.text(s.url.trim(), 60)
                     if (!t.contains("#EXTM3U") && !t.contains("#EXTINF")) throw java.io.IOException("Not a valid M3U playlist")
@@ -259,7 +261,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun loadKey(s: Source, kind: String) = if (s.type == "xtream") kind else "all"
+    private fun loadKey(s: Source, kind: String) = if (s.type == "m3u") "all" else kind
 
     fun isLoading(kind: String): Boolean {
         val s = src() ?: return false
@@ -284,7 +286,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 if (!have && !force) {
-                    val kinds = if (s.type == "xtream") listOf(kind) else listOf("live", "vod", "series")
+                    val kinds = if (s.type == "m3u") listOf("live", "vod", "series") else listOf(kind)
                     for (k in kinds) {
                         val c = CatalogCache.read(sourceCacheKey(s), k)
                         if (c != null && src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
@@ -294,8 +296,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 if (force || !catalog.containsKey(kind) || stale(s, kind)) {
-                    if (s.type == "xtream") {
-                        val list = Xtream.catalog(s, kind)
+                    if (s.type == "xtream" || s.type == "stalker") {
+                        val list = if (s.type == "xtream") Xtream.catalog(s, kind) else Stalker.catalog(s, kind)
                         if (src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
                             catalog[kind] = list
                             updatedAt[kind] = System.currentTimeMillis()
@@ -435,7 +437,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         episodesLoading = true
         detailJob = viewModelScope.launch {
             try {
-                val r = Xtream.series(s, serie)
+                val r = if (s.type == "stalker") Stalker.series(s, serie) else Xtream.series(s, serie)
                 meta = r.first
                 episodes = r.second
                 playList = r.second
@@ -471,7 +473,18 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         liveFormatFallbackUsed = false
         liveAutoRetryCount = 0
         bumpView(it)
-        playOrCast(PlayReq(Xtream.resolve(s, it), it.name, it.kind, it, s))
+        if (s.type == "stalker") {
+            viewModelScope.launch {
+                try {
+                    val url = Stalker.resolve(s, it)
+                    playOrCast(PlayReq(url, it.name, it.kind, it, s))
+                } catch (e: Exception) {
+                    message = e.message ?: "Could not resolve Stalker stream"
+                }
+            }
+        } else {
+            playOrCast(PlayReq(Xtream.resolve(s, it), it.name, it.kind, it, s))
+        }
     }
 
     fun canStep(delta: Int): Boolean {

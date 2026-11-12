@@ -12,15 +12,18 @@ data class Source(
     val url: String,
     val user: String = "",
     val pass: String = "",
-    val format: String = "auto"
+    val format: String = "auto",
+    val mac: String = "",
+    val proxy: String = ""
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("type", type)
-        .put("url", url).put("user", user).put("pass", pass).put("format", format)
+        .put("url", url).put("user", user).put("pass", pass).put("format", format).put("mac", mac).put("proxy", proxy)
 
     companion object {
         fun from(o: JSONObject) = Source(
             o.getString("id"), o.optString("name"), o.optString("type", "xtream"), o.optString("url"),
-            o.optString("user"), o.optString("pass"), o.optString("format", "auto")
+            o.optString("user"), o.optString("pass"), o.optString("format", "auto"),
+            o.optString("mac"), o.optString("proxy")
         )
     }
 }
@@ -40,21 +43,22 @@ data class Item(
     val rating: Double = 0.0,
     val plot: String = "",
     val info: String = "",
-    val parent: String = ""
+    val parent: String = "",
+    val cmd: String = ""
 ) {
     val key: String get() = "$srcId|$kind|$id"
 
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("group", group)
         .put("logo", logo).put("kind", kind).put("ext", ext).put("url", url).put("srcId", srcId)
         .put("season", season).put("num", num).put("added", added).put("rating", rating)
-        .put("plot", plot).put("info", info).put("parent", parent)
+        .put("plot", plot).put("info", info).put("parent", parent).put("cmd", cmd)
 
     companion object {
         fun from(o: JSONObject) = Item(
             o.optString("id"), o.optString("name"), o.optString("group"), o.optString("logo"),
             o.optString("kind", "live"), o.optString("ext"), o.optString("url"), o.optString("srcId"),
             o.optInt("season"), o.optInt("num"), o.optLong("added"), o.optDouble("rating", 0.0),
-            o.optString("plot"), o.optString("info"), o.optString("parent")
+            o.optString("plot"), o.optString("info"), o.optString("parent"), o.optString("cmd")
         )
     }
 }

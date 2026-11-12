@@ -10,7 +10,7 @@ object MediaUrlValidator {
         return try {
             val uri = URI(value.trim())
             val scheme = uri.scheme?.lowercase()
-            (scheme == "http" || scheme == "https") &&
+            (scheme == "http" || scheme == "https" || scheme == "rtsp") &&
                 !uri.host.isNullOrBlank() &&
                 uri.userInfo == null &&
                 (uri.port == -1 || uri.port in 1..65535)
