@@ -33,12 +33,18 @@ object Stalker {
 
     suspend fun login(s: Source) {
         if (s.url.isBlank()) throw IOException("Enter the Stalker portal URL")
-        if (s.mac.isBlank()) throw IOException("Enter the device MAC address")
+        val mac = s.mac.trim().uppercase().replace('-', ':').let { value ->
+            if (Regex("^[0-9A-F]{12}$").matches(value)) value.chunked(2).joinToString(":") else value
+        }
+        if (!Regex("^([0-9A-F]{2}:){5}[0-9A-F]{2}$").matches(mac)) {
+            throw IOException("MAC must look like 00:1A:79:XX:XX:XX")
+        }
+        val normalized = if (mac == s.mac) s else s.copy(mac = mac)
         tokens[s.id]?.let { return }
-        val handshake = call(s, mapOf("type" to "stb", "action" to "handshake", "token" to ""))
+        val handshake = call(normalized, mapOf("type" to "stb", "action" to "handshake", "token" to ""))
         val token = handshake.optString("token")
         if (token.isBlank()) throw IOException("Stalker handshake failed. Check portal URL and MAC address.")
-        call(s, mapOf("type" to "stb", "action" to "get_profile", "hd" to "1", "stb_lang" to "en", "timezone" to "Europe/Paris"), token)
+        call(normalized, mapOf("type" to "stb", "action" to "get_profile", "hd" to "1", "stb_lang" to "en", "timezone" to "Europe/Paris"), token)
         tokens[s.id] = token
     }
 
@@ -71,7 +77,8 @@ object Stalker {
         if (kind == "live") {
             val genres = runCatching { list(call(s, mapOf("type" to "itv", "action" to "get_genres"), token)) }.getOrDefault(emptyList())
             val names = genres.associate { it.optString("id") to it.optString("title") }
-            val channels = list(call(s, mapOf("type" to "itv", "action" to "get_all_channels"), token))
+            val channelResponse = call(s, mapOf("type" to "itv", "action" to "get_all_channels"), token)
+            val channels = list(channelResponse.opt("data"))
             channels.map { c ->
                 Item(c.optString("id"), c.optString("name").ifBlank { "Unknown" }, names[c.optString("tv_genre_id")] ?: "Uncategorized",
                     logo(s, c.optString("logo")), "live", srcId = s.id, cmd = c.optString("cmd"))
