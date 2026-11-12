@@ -41,7 +41,8 @@ Lumora gives you a clean, fast interface for managing your own IPTV sources and 
 - Most viewed channels, and new releases.
 - Series episodes, with saved positions.
 - Playback speed control (0.75x to 2x) with a saved default, automatic stream recovery, and auto-play of the next episode.
-- Subtitles: load your own `.srt` or `.vtt` file, with sync adjustment and automatic format detection.
+- Sleep timer (15 min to 2 h) that pauses playback automatically.
+- Subtitles: load your own `.srt` or `.vtt` file, with sync adjustment and automatic format and encoding detection (UTF-8, UTF-16, Arabic windows-1256).
 
 **Downloads**
 - Download movies and episodes for offline viewing, with pause/resume.
@@ -53,7 +54,7 @@ Lumora gives you a clean, fast interface for managing your own IPTV sources and 
 - Favorites per account, and keep the screen awake while playing.
 
 **Parental controls**
-- Adult categories can be locked behind a 4-digit PIN.
+- Adult categories can be locked behind a 4-digit PIN. Locked titles are also hidden from Home, All titles, and Favorites until unlocked.
 
 **Cast to Samsung TV**
 - Send playback from your phone to the Lumora app on a Samsung TV (Tizen) over the same Wi-Fi network.
@@ -62,7 +63,8 @@ Lumora gives you a clean, fast interface for managing your own IPTV sources and 
 **Settings and data**
 - Back button navigates through screens, sheets, and dialogs.
 - Backup export and import (JSON): sources, favorites, continue watching, and settings. The backup contains passwords, so keep it private.
-- Clear saved lists, progress, or favorites.
+- Clear saved lists, progress, or favorites. Destructive actions (delete source, delete download, clear data, restore backup) ask for confirmation.
+- Share the last crash report from Settings > About.
 
 ## Apps in this repository
 

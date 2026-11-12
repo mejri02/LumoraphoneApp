@@ -36,7 +36,7 @@ If you encounter a problem, please report it through the repository's "Issues" (
 
 ---
 
-Lumora TV 1.6.1
+Lumora TV 1.7.0
 
 Android settings highlights:
 - Playback: resume, auto-play next episode, keep the screen on, default speed, TV casting.

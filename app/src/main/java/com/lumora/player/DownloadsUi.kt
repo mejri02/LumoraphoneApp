@@ -80,7 +80,13 @@ fun DownloadsScreen(vm: AppVM) {
     Column(Modifier.fillMaxSize().themeBackground().blockTouches().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.showDownloads = false }) { Icon(Icons.Default.ArrowBack, "Back") }
-            Text("Downloads", Modifier.weight(1f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Column(Modifier.weight(1f)) {
+                Text("Downloads", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                if (vm.downloads.isNotEmpty()) {
+                    val used = vm.downloads.sumOf { d -> vm.dlInfo[d.item.key]?.done ?: 0L }
+                    Text("${vm.downloads.size} item(s) · ${fmtBytes(used)} used", fontSize = 12.sp, color = Color.Gray)
+                }
+            }
         }
         if (vm.downloads.isEmpty()) {
             EmptyState("No downloads yet", "Open a movie or episode and tap Download.")
@@ -99,6 +105,11 @@ fun DownloadsScreen(vm: AppVM) {
 @Composable
 fun DownloadRow(vm: AppVM, d: Download) {
     val info = vm.dlInfo[d.item.key]
+    var confirmDelete by remember { mutableStateOf(false) }
+    if (confirmDelete) ConfirmDialog(
+        "Delete download?", "\"" + d.item.name + "\" will be removed from this phone.", "Delete",
+        { vm.deleteDownload(d) }, { confirmDelete = false }
+    )
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)
     ) {
@@ -118,7 +129,7 @@ fun DownloadRow(vm: AppVM, d: Download) {
                     Icon(if (info.paused) Icons.Default.PlayArrow else Icons.Default.Pause, if (info.paused) "Resume" else "Pause")
                 }
             }
-            IconButton(onClick = { vm.deleteDownload(d) }) { Icon(Icons.Default.Delete, "Delete") }
+            IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete") }
         }
         if (info != null && !info.ready && !info.failed) {
             Spacer(Modifier.height(8.dp))

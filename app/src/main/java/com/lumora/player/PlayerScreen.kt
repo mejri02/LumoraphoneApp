@@ -78,6 +78,7 @@ fun PlayerPane(
     var drag by remember { mutableStateOf<Float?>(null) }
     var hint by remember { mutableStateOf("") }
     var showSubtitles by remember { mutableStateOf(false) }
+    var showSleep by remember { mutableStateOf(false) }
     var subtitleFile by remember(req.url) { mutableStateOf<File?>(null) }
     var subtitleOffset by remember(req.url) { mutableIntStateOf(0) }
     var subtitleStatus by remember { mutableStateOf("") }
@@ -269,6 +270,13 @@ fun PlayerPane(
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                     ) { Text(vm.speedLabel(), color = Color.White, fontSize = 13.sp) }
                     if (!live) CtrlBtn(Icons.Default.Subtitles, "Subtitles", 40) { showSubtitles = true; show = true }
+                    IconButton(onClick = { showSleep = true; show = true }, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            Icons.Default.Timer, "Sleep timer",
+                            tint = if (vm.sleepAt > 0L) MaterialTheme.colorScheme.primary else Color.White,
+                            modifier = Modifier.size(25.dp)
+                        )
+                    }
                     CtrlBtn(Icons.Default.AspectRatio, "Aspect", 40) {
                         resize = when (resize) {
                             AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -281,6 +289,27 @@ fun PlayerPane(
                 }
             }
         }
+
+        if (showSleep) AlertDialog(
+            onDismissRequest = { showSleep = false },
+            title = { Text("Sleep timer") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (vm.sleepAt > 0L) {
+                        val left = ((vm.sleepAt - System.currentTimeMillis()) / 60_000L).coerceAtLeast(0L) + 1L
+                        Text("Pauses in about $left min", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text("Pause playback automatically after:", style = MaterialTheme.typography.bodySmall)
+                    }
+                    listOf(0 to "Off", 15 to "15 minutes", 30 to "30 minutes", 60 to "1 hour", 90 to "1.5 hours", 120 to "2 hours").forEach { (m, label) ->
+                        TextButton(onClick = { vm.setSleepTimer(m); showSleep = false }, modifier = Modifier.fillMaxWidth()) {
+                            Text(label, Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showSleep = false }) { Text("Close") } }
+        )
 
         if (showSubtitles) AlertDialog(
             onDismissRequest = { showSubtitles = false },
@@ -310,7 +339,7 @@ fun PlayerPane(
 
 private fun applySubtitleFile(player: androidx.media3.exoplayer.ExoPlayer, videoUrl: String, original: File, offsetMs: Int) {
     try {
-        val raw = original.readText(Charsets.UTF_8)
+        val raw = decodeSubtitle(original.readBytes())
         val shifted = shiftSubtitleTimestamps(raw, offsetMs)
         // Trust the file content as well as the extension: some pickers report a generic name.
         val isVtt = original.extension.equals("vtt", true) || raw.trimStart().startsWith("WEBVTT", ignoreCase = true)
@@ -326,6 +355,27 @@ private fun applySubtitleFile(player: androidx.media3.exoplayer.ExoPlayer, video
         player.seekTo(position)
         player.playWhenReady = wasPlaying
     } catch (_: Exception) { }
+}
+
+/**
+ * Subtitle files are often not UTF-8 (Arabic files are commonly windows-1256), and reading them as
+ * UTF-8 turns every letter into "?". Detect the encoding instead of assuming one.
+ */
+internal fun decodeSubtitle(b: ByteArray): String {
+    if (b.size >= 3 && b[0] == 0xEF.toByte() && b[1] == 0xBB.toByte() && b[2] == 0xBF.toByte()) return String(b, 3, b.size - 3, Charsets.UTF_8)
+    if (b.size >= 2 && b[0] == 0xFF.toByte() && b[1] == 0xFE.toByte()) return String(b, 2, b.size - 2, Charsets.UTF_16LE)
+    if (b.size >= 2 && b[0] == 0xFE.toByte() && b[1] == 0xFF.toByte()) return String(b, 2, b.size - 2, Charsets.UTF_16BE)
+    try {
+        return Charsets.UTF_8.newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+            .decode(java.nio.ByteBuffer.wrap(b)).toString()
+    } catch (_: java.nio.charset.CharacterCodingException) {
+    }
+    val high = b.count { it.toInt() and 0x80 != 0 }
+    val arabic = try { String(b, java.nio.charset.Charset.forName("windows-1256")) } catch (_: Exception) { null }
+    if (arabic != null && high > 0 && arabic.count { it in '؀'..'ۿ' } * 2 >= high) return arabic
+    return try { String(b, java.nio.charset.Charset.forName("windows-1252")) } catch (_: Exception) { String(b, Charsets.ISO_8859_1) }
 }
 
 private fun shiftSubtitleTimestamps(text: String, offsetMs: Int): String {

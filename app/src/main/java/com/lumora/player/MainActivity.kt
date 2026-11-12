@@ -275,7 +275,8 @@ fun Root(vm: AppVM) {
                 NavigationBar(containerColor = if (themed) MaterialTheme.colorScheme.surface.copy(alpha = 0.92f) else if (vm.themeIdx == 0) Color(0xFF0F0F15) else MaterialTheme.colorScheme.surface) {
                     val navItems = listOf(
                         Triple("Home", Icons.Default.Home, 0), Triple("Catalog", Icons.Default.VideoLibrary, 1),
-                        Triple("Favorites", Icons.Default.Star, 2), Triple("Search", Icons.Default.Search, 3)
+                        Triple("Favorites", Icons.Default.Star, 2), Triple("Search", Icons.Default.Search, 3),
+                        Triple("Guide", Icons.Default.Event, 4)
                     )
                     navItems.forEach { (label, icon, i) ->
                         NavigationBarItem(
@@ -292,6 +293,7 @@ fun Root(vm: AppVM) {
                     1 -> CatalogTab(vm)
                     2 -> FavoritesTab(vm)
                     3 -> SearchTab(vm)
+                    4 -> GuideTab()
                 }
             }
         }
@@ -342,6 +344,7 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
     var listsOpen by rememberSaveable { mutableStateOf(false) }
     var browseOpen by rememberSaveable { mutableStateOf(false) }
     var playOpen by rememberSaveable { mutableStateOf(false) }
+    var pending by remember { mutableStateOf<ConfirmReq?>(null) }
     val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) vm.backupTo(uri)
     }
@@ -368,14 +371,9 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                 LaunchedEffect(s.id, s.url, s.user, s.pass, s.type) {
                     if (on) vm.refreshAccountInfo(s, force = true)
                 }
-                val expiryKey = remember(s.id, s.url, s.user, s.pass, s.type) {
-                    // Match the view-model cache identity for the currently displayed source.
-                    val raw = "${s.type}|${s.url.trim().trimEnd('/')}|${s.user.trim()}|${s.pass}|${s.format}"
-                    val digest = java.security.MessageDigest.getInstance("SHA-256")
-                        .digest(raw.toByteArray(Charsets.UTF_8))
-                        .take(12).joinToString("") { "%02x".format(it) }
-                    "${s.id}_$digest"
-                }
+                // Must be the exact key the view-model stores account info under (it also hashes mac and
+                // proxy, so rebuilding it here by hand never matched and the expiry was never shown).
+                val expiryKey = remember(s) { vm.cacheKey(s) }
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant).background(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.Transparent)
@@ -420,7 +418,11 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                 }
             }
             if (listsOpen) item { ActionRow("Update lists now", "Download channels, movies and series again") { vm.refreshAll() } }
-            if (listsOpen) item { ActionRow("Clear saved lists", "Frees space. Lists are downloaded again when needed") { vm.clearCache() } }
+            if (listsOpen) item {
+                ActionRow("Clear saved lists", "Frees space. Lists are downloaded again when needed") {
+                    pending = ConfirmReq("Clear saved lists?", "Channels, movies and series are downloaded again when you open them.", "Clear") { vm.clearCache() }
+                }
+            }
             item {
                 CollapseHeader("Browsing", if (vm.sort == "az") "Categories A-Z" else "Categories by most items", browseOpen) { browseOpen = !browseOpen }
             }
@@ -507,16 +509,65 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                 ) { pinDialog = true }
             }
             item { SettingHeader("Data") }
-            item { ActionRow("Clear continue watching", "Removes saved progress") { vm.clearProgress() } }
-            item { ActionRow("Clear favorites", "Removes all favorites") { vm.clearFavs() } }
+            item {
+                ActionRow("Clear continue watching", "Removes saved progress") {
+                    pending = ConfirmReq("Clear continue watching?", "Saved positions for this account will be removed.", "Clear") { vm.clearProgress() }
+                }
+            }
+            item {
+                ActionRow("Clear favorites", "Removes all favorites") {
+                    pending = ConfirmReq("Clear favorites?", "All favorites of this account will be removed.", "Clear") { vm.clearFavs() }
+                }
+            }
             item { SettingHeader("Backup") }
             item { ActionRow("Export backup", "Save sources, favorites, progress and settings as a JSON file") { exportPicker.launch("lumora-backup.json") } }
-            item { ActionRow("Restore backup", "Replace this phone's Lumora data with a backup file") { importPicker.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) } }
+            item {
+                ActionRow("Restore backup", "Replace this phone's Lumora data with a backup file") {
+                    pending = ConfirmReq("Restore backup?", "Your current sources, favorites, progress and settings will be replaced by the backup file.", "Choose file") {
+                        importPicker.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+                    }
+                }
+            }
             item { SettingHeader("About") }
-            item { Text("Lumora 1.6.1", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(4.dp)) }
+            item {
+                val ctx = LocalContext.current
+                val version = remember {
+                    try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName.orEmpty() } catch (_: Exception) { "" }
+                }
+                Text("Lumora $version", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(4.dp))
+            }
+            item {
+                val ctx = LocalContext.current
+                val crash = remember { java.io.File(ctx.filesDir, "crash.log") }
+                if (crash.exists() && crash.length() > 0L) ActionRow("Share last crash report", "Send the error details to the developer") {
+                    try {
+                        val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+                            .putExtra(Intent.EXTRA_SUBJECT, "Lumora crash report")
+                            .putExtra(Intent.EXTRA_TEXT, crash.readText().take(20_000))
+                        ctx.startActivity(Intent.createChooser(send, "Share crash report"))
+                    } catch (_: Exception) {
+                        vm.toast("Could not open the share sheet")
+                    }
+                }
+            }
         }
     }
     if (pinDialog) PinDialog(vm) { pinDialog = false }
+    pending?.let { req -> ConfirmDialog(req.title, req.text, req.label, req.action) { pending = null } }
+}
+
+/** A destructive action waiting for the user's confirmation. */
+class ConfirmReq(val title: String, val text: String, val label: String, val action: () -> Unit)
+
+@Composable
+fun ConfirmDialog(title: String, text: String, label: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+        confirmButton = { TextButton(onClick = { onConfirm(); onDismiss() }) { Text(label, color = Color(0xFFFF6B6B)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 /** Small preview card for a theme: its picture (or plain color) with the name under it. */
@@ -658,12 +709,15 @@ fun SourceForm(vm: AppVM, start: Source, close: () -> Unit) {
     var user by remember { mutableStateOf(start.user) }
     var pass by remember { mutableStateOf(start.pass) }
     var format by remember { mutableStateOf(start.format) }
+    var mac by remember { mutableStateOf(start.mac) }
+    var proxy by remember { mutableStateOf(start.proxy.ifBlank { Stalker.DEFAULT_PROXY }) }
     var menu by remember { mutableStateOf(false) }
     var testing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf(false) }
     val exists = vm.sources.any { it.id == start.id }
 
-    fun build() = Source(start.id, name.trim().ifBlank { url.trim() }, type, url.trim(), user.trim(), pass.trim(), format)
+    fun build() = Source(start.id, name.trim().ifBlank { url.trim() }, type, url.trim(), user.trim(), pass.trim(), format, mac.trim(), proxy.trim())
 
     AlertDialog(
         onDismissRequest = close,
@@ -672,15 +726,20 @@ fun SourceForm(vm: AppVM, start: Source, close: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box {
                     OutlinedButton(onClick = { menu = true }, Modifier.fillMaxWidth()) {
-                        Text(if (type == "xtream") "Xtream Codes" else "M3U playlist URL")
+                        Text(when (type) { "xtream" -> "Xtream Codes"; "stalker" -> "Stalker Portal"; else -> "M3U playlist URL" })
                     }
                     DropdownMenu(menu, { menu = false }) {
                         DropdownMenuItem(text = { Text("Xtream Codes") }, onClick = { type = "xtream"; menu = false })
                         DropdownMenuItem(text = { Text("M3U playlist URL") }, onClick = { type = "m3u"; menu = false })
+                        DropdownMenuItem(text = { Text("Stalker Portal") }, onClick = { type = "stalker"; menu = false })
                     }
                 }
                 OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(url, { url = it }, label = { Text(if (type == "xtream") "Server URL" else "Playlist URL") }, singleLine = true)
+                OutlinedTextField(url, { url = it }, label = { Text(if (type == "m3u") "Playlist URL" else if (type == "stalker") "Portal URL" else "Server URL") }, singleLine = true)
+                if (type == "stalker") {
+                    OutlinedTextField(mac, { mac = it }, label = { Text("MAC address") }, singleLine = true)
+                    OutlinedTextField(proxy, { proxy = it }, label = { Text("Cloudflare Cookie proxy URL") }, singleLine = true)
+                }
                 if (type == "xtream") {
                     OutlinedTextField(user, { user = it }, label = { Text("Username") }, singleLine = true)
                     OutlinedTextField(
@@ -733,10 +792,17 @@ fun SourceForm(vm: AppVM, start: Source, close: () -> Unit) {
         },
         dismissButton = {
             Row {
-                if (exists) TextButton(onClick = { vm.deleteSource(start.id); close() }) { Icon(Icons.Default.Delete, "Delete") }
+                if (exists) TextButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete") }
                 TextButton(onClick = close) { Text("Cancel") }
             }
         }
+    )
+    if (confirmDelete) ConfirmDialog(
+        "Delete this source?",
+        "Its saved lists, favorites and progress on this phone are removed too.",
+        "Delete",
+        { vm.deleteSource(start.id); close() },
+        { confirmDelete = false }
     )
 }
 

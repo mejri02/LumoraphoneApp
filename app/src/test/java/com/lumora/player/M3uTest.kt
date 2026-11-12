@@ -23,6 +23,21 @@ class M3uTest {
         assertTrue(series.isEmpty())
     }
 
+    @Test fun keepsNonAsciiUrlsStripsHeaderSuffixAndAcceptsRtmp() {
+        val input = """
+            #EXTM3U
+            #EXTINF:-1 group-title="Arabic",قناة
+            http://example.com/live/قناة.m3u8
+            #EXTINF:-1,Piped
+            http://example.com/piped.ts|User-Agent=VLC
+            #EXTINF:-1,Rtmp
+            rtmp://example.com/live/stream
+        """.trimIndent()
+        val (live, _, _) = M3u.parse(input, "t")
+        assertEquals(3, live.size)
+        assertEquals("http://example.com/piped.ts", live[1].url)
+    }
+
     @Test fun toleratesEmptyOrCorruptedPlaylist() {
         val (live, vod, series) = M3u.parse("not a playlist\nhttps://example.com/good.m3u8\nhttp://", "test")
         assertEquals(1, live.size)

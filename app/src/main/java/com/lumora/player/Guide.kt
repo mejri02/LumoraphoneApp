@@ -121,10 +121,10 @@ fun GuideTab() {
         (filter == "All" || it.name.contains(filter, ignoreCase = true)) &&
             (query.isBlank() || it.name.contains(query, ignoreCase = true))
     }
-    val programmeMap = remember(data, now) {
-        data?.channels.orEmpty().associate { ch ->
-            ch.id to data!!.programmes.filter { it.channelId == ch.id && it.stop > now }.sortedBy { it.start }.take(4)
-        }
+    // Group once per download instead of scanning every programme for every channel on each recomposition.
+    val byChannel = remember(data) { data?.programmes.orEmpty().groupBy { it.channelId } }
+    val programmeMap = remember(byChannel, now / 60_000L) {
+        byChannel.mapValues { (_, list) -> list.filter { it.stop > now }.sortedBy { it.start }.take(4) }
     }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -44,13 +44,15 @@ fun HomeTab(vm: AppVM, onSeeAll: () -> Unit, onAddSource: () -> Unit) {
         vm.load("vod")
         vm.load("series")
     }
-    val cw = vm.continueWatching()
+    // Adult categories stay hidden on the home page until the PIN has been entered.
+    val cw = vm.continueWatching().filter { p -> !vm.locked(p.item.group) }
     val live = vm.catalog["live"]
     val vod = vm.catalog["vod"]
     val ser = vm.catalog["series"]
-    val channels = vm.mostViewed().map { v -> v.item }.ifEmpty { (live ?: emptyList()).take(12) }
-    val movies = remember(vod) { (vod ?: emptyList()).sortedByDescending { m -> m.added }.take(14) }
-    val shows = remember(ser) { (ser ?: emptyList()).sortedByDescending { m -> m.added }.take(14) }
+    val channels = vm.mostViewed().map { v -> v.item }.filter { !vm.locked(it.group) }
+        .ifEmpty { (live ?: emptyList()).filter { !vm.locked(it.group) }.take(12) }
+    val movies = remember(vod, vm.pin, vm.unlocked) { (vod ?: emptyList()).filter { !vm.locked(it.group) }.sortedByDescending { m -> m.added }.take(14) }
+    val shows = remember(ser, vm.pin, vm.unlocked) { (ser ?: emptyList()).filter { !vm.locked(it.group) }.sortedByDescending { m -> m.added }.take(14) }
     val busy = vm.isLoading("live") || vm.isLoading("vod") || vm.isLoading("series")
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -279,7 +281,10 @@ fun CategoryScreen(vm: AppVM, ref: GroupRef) {
     var q by remember(ref) { mutableStateOf("") }
     var channelSort by rememberSaveable(ref.kind, ref.name) { mutableStateOf("name") }
     var favoritesOnly by rememberSaveable(ref.kind, ref.name) { mutableStateOf(false) }
-    val base = remember(all, ref) { if (ref.name.isEmpty()) all else all.filter { it.group == ref.name } }
+    // "All titles" must not expose adult categories while the PIN lock is active.
+    val base = remember(all, ref, vm.pin, vm.unlocked) {
+        if (ref.name.isEmpty()) all.filter { !vm.locked(it.group) } else all.filter { it.group == ref.name }
+    }
     val searched = remember(base, q) { if (q.isBlank()) base else base.filter { it.name.contains(q.trim(), ignoreCase = true) } }
     val favoriteFiltered = remember(searched, favoritesOnly, vm.favs.size) {
         if (!favoritesOnly) searched else searched.filter { item -> vm.isFav(item) }
@@ -342,7 +347,9 @@ fun FavoritesTab(vm: AppVM) {
             EmptyState("No favorites yet", "Open any title and tap the star to keep it here")
         } else {
             SortPills(vm)
-            PosterGrid(vm, vm.favs.toList(), Modifier.weight(1f))
+            val visible = vm.favs.filter { !vm.locked(it.group) }
+            if (visible.isEmpty()) EmptyState("Favorites are locked", "Unlock the adult category to see them")
+            else PosterGrid(vm, visible, Modifier.weight(1f))
         }
     }
 }

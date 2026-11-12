@@ -13,8 +13,8 @@ android {
         applicationId = "com.lumora.player"
         minSdk = 24
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.6.1"
+        versionCode = 9
+        versionName = "1.7.0"
     }
 
     val ks = System.getenv("KEYSTORE_FILE")
@@ -59,8 +59,18 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.3.1")
+    implementation("androidx.media3:media3-exoplayer-rtsp:1.3.1")
+    implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    // LibVLC fallback for legacy IPTV transports not supported by Media3.
+    implementation("org.videolan.android:libvlc-all:3.7.7") {
+        // Keep the project Kotlin 1.9 toolchain; LibVLC does not need its newer
+        // transitive Kotlin stdlib at runtime (Android provides the app stdlib).
+        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
+    }
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.24")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")

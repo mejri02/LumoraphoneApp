@@ -116,6 +116,28 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var wifiOnly by mutableStateOf(Store.getBool("wifiOnly", false))
     var speed by mutableStateOf(Store.getString("speed", "1").toFloatOrNull()?.coerceIn(0.5f, 2f) ?: 1f)
 
+    // ---------- sleep timer: pauses playback after the chosen number of minutes ----------
+    var sleepAt by mutableStateOf(0L)
+    private var sleepJob: Job? = null
+
+    fun setSleepTimer(minutes: Int) {
+        sleepJob?.cancel()
+        if (minutes <= 0) {
+            sleepAt = 0L
+            message = "Sleep timer off"
+            return
+        }
+        sleepAt = System.currentTimeMillis() + minutes * 60_000L
+        message = "Sleep timer set: $minutes min"
+        sleepJob = viewModelScope.launch {
+            delay(minutes * 60_000L)
+            sleepAt = 0L
+            saveCurrentProgress()
+            exo?.pause()
+            message = "Sleep timer ended. Playback paused"
+        }
+    }
+
     // ---------- player state: lives here so playback keeps going when minimized or in picture-in-picture ----------
     var exo: ExoPlayer? = null
     var isPlaying by mutableStateOf(false)
@@ -160,9 +182,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         Store.putString("uiTheme", themeIdx.toString())
     }
 
+    /** Same identity the view-model uses for caches and account info (the Settings screen needs it too). */
+    fun cacheKey(s: Source): String = sourceCacheKey(s)
+
     private fun sourceCacheKey(s: Source): String {
         // Include credentials in cache identity so an edited Xtream account never sees old lists.
-        val raw = "${s.type}|${s.url.trim().trimEnd('/')}|${s.user.trim()}|${s.pass}|${s.format}"
+        val raw = "${s.type}|${s.url.trim().trimEnd('/')}|${s.user.trim()}|${s.pass}|${s.format}|${s.mac}|${s.proxy}"
         val digest = java.security.MessageDigest.getInstance("SHA-256")
             .digest(raw.toByteArray(Charsets.UTF_8))
             .take(12).joinToString("") { "%02x".format(it) }
@@ -248,9 +273,16 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             try {
                 if (s.type == "xtream") {
                     Xtream.login(s)
+                } else if (s.type == "stalker") {
+                    Stalker.login(s)
                 } else {
-                    val t = Net.text(s.url.trim(), 60)
-                    if (!t.contains("#EXTM3U") && !t.contains("#EXTINF")) throw java.io.IOException("Not a valid M3U playlist")
+                    // Read only the first few KB: playlists can be tens of MB and the test must stay fast.
+                    val head = Net.stream(s.url.trim(), 60) { rd ->
+                        val buf = CharArray(8192)
+                        val n = rd.read(buf)
+                        if (n > 0) String(buf, 0, n) else ""
+                    }
+                    if (!head.contains("#EXTM3U") && !head.contains("#EXTINF")) throw java.io.IOException("Not a valid M3U playlist")
                 }
                 done(null)
             } catch (e: Exception) {
@@ -259,7 +291,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun loadKey(s: Source, kind: String) = if (s.type == "xtream") kind else "all"
+    private fun loadKey(s: Source, kind: String) = if (s.type == "m3u") "all" else kind
 
     fun isLoading(kind: String): Boolean {
         val s = src() ?: return false
@@ -284,7 +316,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 if (!have && !force) {
-                    val kinds = if (s.type == "xtream") listOf(kind) else listOf("live", "vod", "series")
+                    val kinds = if (s.type == "m3u") listOf("live", "vod", "series") else listOf(kind)
                     for (k in kinds) {
                         val c = CatalogCache.read(sourceCacheKey(s), k)
                         if (c != null && src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
@@ -294,8 +326,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 if (force || !catalog.containsKey(kind) || stale(s, kind)) {
-                    if (s.type == "xtream") {
-                        val list = Xtream.catalog(s, kind)
+                    if (s.type == "xtream" || s.type == "stalker") {
+                        val list = if (s.type == "xtream") Xtream.catalog(s, kind) else Stalker.catalog(s, kind)
                         if (src()?.let { sourceCacheKey(it) } == sourceCacheKey(s)) {
                             catalog[kind] = list
                             updatedAt[kind] = System.currentTimeMillis()
@@ -435,7 +467,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         episodesLoading = true
         detailJob = viewModelScope.launch {
             try {
-                val r = Xtream.series(s, serie)
+                val r = if (s.type == "stalker") Stalker.series(s, serie) else Xtream.series(s, serie)
                 meta = r.first
                 episodes = r.second
                 playList = r.second
@@ -471,7 +503,18 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         liveFormatFallbackUsed = false
         liveAutoRetryCount = 0
         bumpView(it)
-        playOrCast(PlayReq(Xtream.resolve(s, it), it.name, it.kind, it, s))
+        if (s.type == "stalker") {
+            viewModelScope.launch {
+                try {
+                    val url = Stalker.resolve(s, it)
+                    playOrCast(PlayReq(url, it.name, it.kind, it, s))
+                } catch (e: Exception) {
+                    message = e.message ?: "Could not resolve Stalker stream"
+                }
+            }
+        } else {
+            playOrCast(PlayReq(Xtream.resolve(s, it), it.name, it.kind, it, s))
+        }
     }
 
     fun canStep(delta: Int): Boolean {
@@ -517,6 +560,21 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun startPlayback(req: PlayReq) {
         playing = req
         minimized = false
+        val scheme = runCatching { android.net.Uri.parse(req.url).scheme?.lowercase().orEmpty() }.getOrDefault("")
+        if (scheme in setOf("rtmp", "rtmps", "rtmpe", "rtmpt", "rtp", "udp", "mms", "mmsh", "mmsu")) {
+            releasePlayer()
+            // The video runs in its own VLC screen. Leaving `playing` set would leave an empty black
+            // player area on the detail page after that screen is closed.
+            playing = null
+            getApplication<Application>().startActivity(
+                android.content.Intent(getApplication(), VlcPlayerActivity::class.java)
+                    .putExtra(VlcPlayerActivity.EXTRA_URL, req.url)
+                    .putExtra(VlcPlayerActivity.EXTRA_LIVE, req.kind == "live")
+                    .putExtra(VlcPlayerActivity.EXTRA_TITLE, req.item?.name ?: req.kind)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            return
+        }
         ensurePlayer(req)
     }
 
@@ -721,6 +779,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeDetail() {
+        sleepJob?.cancel()
+        sleepAt = 0L
         releasePlayer()
         playing = null
         detail = null
@@ -769,7 +829,17 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             message = "Episodes are still loading"
             return
         }
-        cast(PlayReq(Xtream.resolve(s, target), target.name, target.kind, target, s), (progressOf(target) ?: 0L) / 1000, true)
+        viewModelScope.launch {
+            // Stalker links come from the portal; building an Xtream-style URL would not work for them.
+            val url = try {
+                if (s.type == "stalker") Stalker.resolve(s, target) else Xtream.resolve(s, target)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                message = e.message ?: "Could not resolve the stream"
+                return@launch
+            }
+            cast(PlayReq(url, target.name, target.kind, target, s), (progressOf(target) ?: 0L) / 1000, true)
+        }
     }
 
     fun sendSourceToTv(s: Source) {
@@ -926,9 +996,17 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
         dlPaused.remove(key)
         dlJobs[key]?.cancel()
-        val url = Xtream.resolve(s, d.item)
         val file = File(d.path)
-        dlJobs[key] = viewModelScope.launch(Dispatchers.IO) { runDownload(d, url, file) }
+        dlJobs[key] = viewModelScope.launch(Dispatchers.IO) {
+            val url = try {
+                if (s.type == "stalker") Stalker.resolve(s, d.item) else Xtream.resolve(s, d.item)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                setDl(key, DlInfo("Failed (${e.message ?: "error"}) · tap to retry", 0, 0L, d.total, false, true))
+                return@launch
+            }
+            runDownload(d, url, file)
+        }
     }
 
     private suspend fun runDownload(d: Download, url: String, file: File) {

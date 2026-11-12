@@ -4,6 +4,8 @@ object M3u {
     private val attr = Regex("([\\w-]+)=(?:\"([^\"]*)\"|([^,\\s]+))")
     private val file = Regex("\\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|mpg|mpeg|3gp)(\\?|$)", RegexOption.IGNORE_CASE)
 
+    private val headerSuffix = Regex("\\|[A-Za-z-]+=")
+
     fun parse(text: String, srcId: String) = parse(text.lineSequence(), srcId)
 
     fun parse(lines: Sequence<String>, srcId: String): Triple<List<Item>, List<Item>, List<Item>> {
@@ -37,11 +39,13 @@ object M3u {
                 logo = m["tvg-logo"] ?: ""
                 have = true
             } else if (!line.startsWith("#")) {
-                if (MediaUrlValidator.isHttpUrl(line)) {
-                    val isVod = line.contains("/movie/") || line.contains("/series/") || file.containsMatchIn(line)
+                // Some playlists append player headers as "url|User-Agent=...": ExoPlayer cannot use them.
+                val url = if (headerSuffix.containsMatchIn(line)) line.substringBefore('|') else line
+                if (MediaUrlValidator.isStreamUrl(url)) {
+                    val isVod = url.contains("/movie/") || url.contains("/series/") || file.containsMatchIn(url)
                     val it = Item(
-                        line, if (have) name else line, if (have) group else "Uncategorized",
-                        if (have) logo else "", if (isVod) "vod" else "live", url = line, srcId = srcId
+                        url, if (have) name else url, if (have) group else "Uncategorized",
+                        if (have) logo else "", if (isVod) "vod" else "live", url = url, srcId = srcId
                     )
                     if (isVod) vod.add(it) else live.add(it)
                 }
