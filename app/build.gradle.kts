@@ -64,6 +64,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    // LibVLC fallback for legacy IPTV transports not supported by Media3.
+    implementation("org.videolan.android:libvlc-all:3.7.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")

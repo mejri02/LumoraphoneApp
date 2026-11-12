@@ -530,7 +530,28 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun startPlayback(req: PlayReq) {
         playing = req
         minimized = false
+        if (usesLibVlc(req.url)) {
+            releasePlayer()
+            playing = req
+            try {
+                val intent = android.content.Intent(getApplication<Application>(), VlcPlayerActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(VlcPlayerActivity.EXTRA_URL, req.url)
+                    .putExtra(VlcPlayerActivity.EXTRA_TITLE, req.title)
+                    .putExtra(VlcPlayerActivity.EXTRA_LIVE, req.kind == "live")
+                getApplication<Application>().startActivity(intent)
+            } catch (e: Exception) {
+                playerError = "Could not start VLC playback: ${e.message ?: "unknown error"}"
+                message = playerError
+            }
+            return
+        }
         ensurePlayer(req)
+    }
+
+    private fun usesLibVlc(url: String): Boolean {
+        val scheme = runCatching { Uri.parse(url.trim()).scheme?.lowercase(Locale.ROOT) }.getOrNull()
+        return scheme in setOf("rtmp", "rtmps", "rtmpe", "rtmpt", "rtp", "udp", "mms", "mmsh", "mmsu")
     }
 
     /** Builds one player per video. Playback state is kept here, not in the screen. */
@@ -1298,63 +1319,3 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun backupTo(uri: Uri) {
         viewModelScope.launch {
             try {
-                val txt = exportBackup()
-                withContext(Dispatchers.IO) {
-                    val out = getApplication<Application>().contentResolver.openOutputStream(uri)
-                        ?: throw IOException("Cannot open the selected file")
-                    out.use {
-                        it.write(txt.toByteArray(Charsets.UTF_8))
-                        it.flush()
-                    }
-                }
-                message = "Backup saved (${sources.size} source(s))"
-            } catch (e: Exception) {
-                message = "Backup failed: ${e.message ?: "unknown error"}"
-            }
-        }
-    }
-
-    fun restoreFrom(uri: Uri) {
-        viewModelScope.launch {
-            try {
-                val txt = withContext(Dispatchers.IO) {
-                    getApplication<Application>().contentResolver.openInputStream(uri)
-                        ?.bufferedReader()?.use { it.readText() }
-                        ?: throw IOException("Cannot open the selected file")
-                }
-                restoreBackup(txt)
-            } catch (e: Exception) {
-                message = "Restore failed: ${e.message ?: "unknown error"}"
-            }
-        }
-    }
-
-    // ---------- startup and background work ----------
-    init {
-        restoreDownloads()
-        viewModelScope.launch {
-            var n = 0
-            while (true) {
-                delay(1000L)
-                n++
-                if (n % 5 == 0) saveCurrentProgress()
-            }
-        }
-    }
-
-    override fun onCleared() {
-        // The ViewModel can outlive the Activity, but when it really goes away, stop network work.
-        try {
-            saveCurrentProgress()
-        } catch (_: Exception) {
-        }
-        dlCalls.values.forEach { runCatching { it.cancel() } }
-        dlJobs.values.forEach { it.cancel() }
-        try {
-            exo?.release()
-        } catch (_: Exception) {
-        }
-        exo = null
-        super.onCleared()
-    }
-}
