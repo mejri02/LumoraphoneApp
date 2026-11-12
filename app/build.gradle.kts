@@ -65,7 +65,12 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
     // LibVLC fallback for legacy IPTV transports not supported by Media3.
-    implementation("org.videolan.android:libvlc-all:3.7.7")
+    implementation("org.videolan.android:libvlc-all:3.7.7") {
+        // Keep the project Kotlin 1.9 toolchain; LibVLC does not need its newer
+        // transitive Kotlin stdlib at runtime (Android provides the app stdlib).
+        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
+    }
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.24")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
