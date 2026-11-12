@@ -168,8 +168,14 @@ fun PosterGrid(vm: AppVM, list: List<Item>, modifier: Modifier = Modifier.fillMa
     }
     val sorted = remember(list, vm.itemSort) { vm.sortItems(list).distinctBy { it.key }.take(3000) }
     val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // Poster density setting: 0 compact, 1 normal, 2 large.
+    val minTile = when (vm.gridSize) {
+        0 -> 86.dp
+        2 -> 132.dp
+        else -> 104.dp
+    }
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 104.dp),
+        columns = GridCells.Adaptive(minSize = minTile),
         modifier = modifier,
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 16.dp + nav),
         horizontalArrangement = Arrangement.spacedBy(12.dp),

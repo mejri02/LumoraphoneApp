@@ -377,6 +377,8 @@ private fun EpisodeRow(vm: AppVM, serie: Item, e: Item, current: Boolean) {
     val prog = vm.progress.firstOrNull { p -> p.item.key == e.key }
     val frac = if (prog != null && prog.dur > 0) (prog.pos.toFloat() / prog.dur.toFloat()).coerceIn(0f, 1f) else 0f
     val dl = vm.dlInfo[e.key]
+    val offlineFile = vm.downloads.firstOrNull { d -> d.item.key == e.key }
+    val named = e.copy(name = serie.name + " · S" + e.season + "E" + e.num)
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp).clip(RoundedCornerShape(16.dp))
             .background(if (current) primary.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surface)
@@ -401,11 +403,20 @@ private fun EpisodeRow(vm: AppVM, serie: Item, e: Item, current: Boolean) {
             val sub = e.info.ifBlank { e.plot }
             if (sub.isNotBlank()) Text(sub, fontSize = 12.sp, color = Color(0xFF8E92A0), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
         }
-        IconButton(onClick = { vm.download(e.copy(name = serie.name + " · S" + e.season + "E" + e.num)) }) {
+        IconButton(onClick = {
+            val ready = offlineFile
             when {
-                dl?.ready == true -> Icon(Icons.Default.Check, "Offline", tint = Color(0xFF10B981))
-                dl?.paused == true -> Icon(Icons.Default.PlayArrow, "Resume", tint = Color(0xFFB8BBC6))
-                dl != null && !dl.failed -> Text("${dl.percent}%", fontSize = 11.sp, color = Color.Gray)
+                // A finished file usually means "watch offline"; a missing file is re-downloaded.
+                dl?.ready == true && ready != null -> vm.playOffline(ready)
+                dl?.ready == true -> vm.download(named)
+                else -> vm.download(named)
+            }
+        }) {
+            when {
+                dl?.ready == true -> Icon(Icons.Default.PlayArrow, "Play offline", tint = Color(0xFF10B981))
+                dl?.failed == true -> Icon(Icons.Default.Refresh, "Retry download", tint = Color(0xFFE5484D))
+                dl?.paused == true -> Icon(Icons.Default.PlayArrow, "Resume download", tint = Color(0xFFB8BBC6))
+                dl != null -> Text("${dl.percent}%", fontSize = 11.sp, color = Color.Gray)
                 else -> Icon(Icons.Default.Download, "Download", tint = Color(0xFFB8BBC6))
             }
         }

@@ -36,12 +36,16 @@ If you encounter a problem, please report it through the repository's "Issues" (
 
 ---
 
-Lumora TV 1.5.0
+Lumora TV 1.6.1
 
-OpenSubtitles API key setup (Android):
-1. Open LumoraTV Settings.
-2. Find “Subtitles · OpenSubtitles”.
-3. Paste your OpenSubtitles.com API key, press Save, and optionally Test connection.
-4. In the player, open Subtitles to search and download captions.
+Android settings highlights:
+- Playback: resume, auto-play next episode, keep the screen on, default speed, TV casting.
+- Browsing: category order and poster size.
+- Lists: automatic refresh interval, manual update, clear saved lists.
+- Downloads: offline movies and episodes, optional Wi-Fi-only mode.
+- Backup: export/import sources, favorites, progress, and settings as JSON.
+- Parental control: optional 4-digit PIN for adult categories.
 
-The API key is encrypted locally using Android Keystore (AES-GCM). This source archive intentionally excludes tv-app-source and phone-app-source; only Android project files are included.
+Subtitles are loaded from local .srt/.vtt files in the player; no online account or API key is used.
+
+This source archive includes the Android app, the Tizen TV app (tv-app-source) and the phone companion web app (phone-app-source).

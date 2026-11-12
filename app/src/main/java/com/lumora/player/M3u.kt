@@ -1,7 +1,7 @@
 package com.lumora.player
 
 object M3u {
-    private val attr = Regex("([\\w-]+)=\"([^\"]*)\"")
+    private val attr = Regex("([\\w-]+)=(?:\"([^\"]*)\"|([^,\\s]+))")
     private val file = Regex("\\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|mpg|mpeg|3gp)(\\?|$)", RegexOption.IGNORE_CASE)
 
     fun parse(text: String, srcId: String) = parse(text.lineSequence(), srcId)
@@ -11,19 +11,29 @@ object M3u {
         val vod = ArrayList<Item>()
         var name = ""
         var group = "Uncategorized"
+        var extGrp = ""
         var logo = ""
         var have = false
         for (raw in lines) {
-            val line = raw.trim()
+            val line = raw.trim().removePrefix("\uFEFF")
             if (line.isEmpty()) continue
+            if (line.startsWith("#EXTGRP:")) {
+                // #EXTGRP can appear before or after #EXTINF, so keep it for both cases.
+                extGrp = line.substringAfter(':').trim()
+                if (have) group = extGrp.ifBlank { group }
+                continue
+            }
             if (line.startsWith("#EXTINF")) {
                 val m = HashMap<String, String>()
-                attr.findAll(line).forEach { m[it.groupValues[1].lowercase()] = it.groupValues[2] }
+                attr.findAll(line).forEach {
+                    val k = it.groupValues[1].lowercase()
+                    m[k] = it.groupValues[2].ifEmpty { it.groupValues[3] }
+                }
                 val lastQ = line.lastIndexOf('"') + 1
                 val comma = line.indexOf(',', lastQ)
                 name = if (comma >= 0) line.substring(comma + 1).trim() else ""
                 if (name.isEmpty()) name = m["tvg-name"] ?: "Unknown"
-                group = m["group-title"] ?: "Uncategorized"
+                group = m["group-title"].takeUnless { it.isNullOrBlank() } ?: extGrp.ifBlank { "Uncategorized" }
                 logo = m["tvg-logo"] ?: ""
                 have = true
             } else if (!line.startsWith("#")) {
@@ -38,6 +48,7 @@ object M3u {
                 have = false
             }
         }
-        return Triple(live, vod, emptyList())
+        // Playlists often repeat the same URL in several groups; keep the first occurrence only.
+        return Triple(live.distinctBy { it.url }, vod.distinctBy { it.url }, emptyList())
     }
 }

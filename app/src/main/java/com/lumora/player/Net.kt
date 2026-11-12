@@ -31,10 +31,8 @@ object Net {
                 r.body?.string() ?: ""
             }
         } catch (e: IOException) {
-            if (e.message?.startsWith("HTTP") == true || e.message?.contains("denied") == true ||
-                e.message?.contains("Not found") == true || e.message?.contains("Server error") == true
-            ) throw e
-            throw IOException("Network error")
+            if (isServerMessage(e)) throw e
+            throw IOException(friendly(e))
         }
     }
 
@@ -53,11 +51,28 @@ object Net {
                 block(body.charStream().buffered(64 * 1024))
             }
         } catch (e: IOException) {
-            if (e.message?.startsWith("HTTP") == true || e.message?.contains("denied") == true ||
-                e.message?.contains("Not found") == true || e.message?.contains("Server error") == true ||
-                e.message == "Invalid response from server"
-            ) throw e
-            throw IOException("Network error")
+            if (isServerMessage(e) || e.message == "Invalid response from server") throw e
+            throw IOException(friendly(e))
+        }
+    }
+
+    private fun isServerMessage(e: IOException): Boolean {
+        val m = e.message ?: return false
+        return m.startsWith("HTTP") || m.contains("denied") || m.contains("Not found") ||
+            m.contains("Server error") || m.contains("Invalid URL") || m.contains("too large")
+    }
+
+    /** Turns low-level socket failures into messages a viewer can understand. */
+    private fun friendly(e: IOException): String {
+        val m = (e.message ?: "").lowercase()
+        return when {
+            e is java.net.UnknownHostException -> "Cannot find the server. Check the address"
+            e is java.net.SocketTimeoutException || "timeout" in m || "timed out" in m ->
+                "The server took too long to respond"
+            e is java.net.ConnectException -> "Cannot connect to the server"
+            e is javax.net.ssl.SSLException -> "The secure connection failed"
+            m.isNotBlank() -> e.message ?: "Network error"
+            else -> "Network error"
         }
     }
 

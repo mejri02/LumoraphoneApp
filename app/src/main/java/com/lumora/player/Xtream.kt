@@ -24,18 +24,28 @@ private fun JSONObject.firstImage(k: String): String {
 }
 
 object Xtream {
+    /**
+     * Accept either a server root or a commonly pasted Xtream endpoint
+     * (player_api.php, get.php, xmltv.php). Keep reverse-proxy path prefixes,
+     * but discard endpoint query strings so we never append a second API path.
+     */
     fun base(s: Source): String {
-        var u = s.url.trim()
-        if (!u.contains("://")) u = "http://$u"
-        return u.trimEnd('/')
+        var raw = s.url.trim()
+        if (raw.isBlank()) return ""
+        if (!raw.contains("://")) raw = "http://$raw"
+        raw = raw.substringBefore('#').substringBefore('?').trimEnd('/')
+        val endpoint = Regex("(?i)/(player_api\\.php|get\\.php|xmltv\\.php)$")
+        raw = raw.replace(endpoint, "").trimEnd('/')
+        return raw
     }
 
     private fun enc(v: String) = URLEncoder.encode(v.trim(), "UTF-8")
+    private fun pathEnc(v: String) = enc(v).replace("+", "%20")
 
     fun api(s: Source, action: String? = null, extra: String? = null): String {
         var u = base(s) + "/player_api.php?username=" + enc(s.user) + "&password=" + enc(s.pass)
-        if (action != null) u += "&action=$action"
-        if (extra != null) u += "&$extra"
+        if (action != null) u += "&action=" + enc(action)
+        if (extra != null) u += "&" + extra
         return u
     }
 
@@ -55,9 +65,14 @@ object Xtream {
             throw IOException(notXtream)
         }
         val ui = o.optJSONObject("user_info") ?: throw IOException(notXtream)
-        if (ui.optString("auth") != "1") throw IOException("Wrong username or password")
-        val st = ui.optString("status")
-        if (st.isNotEmpty() && st != "Active") throw IOException("Account is not active (status: $st)")
+        // Some panels send auth as a number, some as a boolean, some as "1"/"true".
+        val auth = ui.str("auth").lowercase()
+        if (auth != "1" && auth != "true") throw IOException("Wrong username or password")
+        // Only reject statuses that clearly mean "not usable": Trial/Active/unknown values are fine.
+        val st = ui.str("status")
+        if (st.lowercase() in setOf("inactive", "disabled", "expired", "banned", "suspended", "0")) {
+            throw IOException("Account is not active (status: $st)")
+        }
         val exp = ui.optString("exp_date").toLongOrNull() ?: 0L
         if (exp > 0 && exp * 1000 < System.currentTimeMillis()) {
             val d = java.text.DateFormat.getDateInstance().format(java.util.Date(exp * 1000))
@@ -238,15 +253,31 @@ object Xtream {
         }
     }
 
+    /** Build a live URL for a specific container format. */
+    fun resolveLive(s: Source, it: Item, format: String = s.format): String {
+        if (it.url.isNotBlank()) return it.url
+        // Auto starts with TS (widely supported by Xtream panels); the player
+        // switches to HLS once if TS cannot be prepared.
+        val ext = if (format.equals("ts", true) || format.equals("auto", true)) "ts" else "m3u8"
+        return "${base(s)}/live/${pathEnc(s.user)}/${pathEnc(s.pass)}/${pathEnc(it.id)}.$ext"
+    }
+
+    fun alternateLive(s: Source, it: Item): String {
+        val current = resolveLive(s, it)
+        val alternateFormat = if (s.format.equals("ts", true) || s.format.equals("auto", true)) "m3u8" else "ts"
+        val alternate = resolveLive(s, it, alternateFormat)
+        return if (current == alternate) "" else alternate
+    }
+
     fun resolve(s: Source, it: Item): String {
         if (it.url.isNotEmpty()) return it.url
         val b = base(s)
-        val u = enc(s.user)
-        val p = enc(s.pass)
+        val u = pathEnc(s.user)
+        val p = pathEnc(s.pass)
         return when (it.kind) {
-            "live" -> "$b/live/$u/$p/${it.id}." + (if (s.format == "ts") "ts" else "m3u8")
-            "ep" -> "$b/series/$u/$p/${it.id}.${it.ext.ifBlank { "mp4" }}"
-            else -> "$b/movie/$u/$p/${it.id}.${it.ext.ifBlank { "mp4" }}"
+            "live" -> resolveLive(s, it)
+            "ep" -> "$b/series/$u/$p/${pathEnc(it.id)}.${it.ext.ifBlank { "mp4" }}"
+            else -> "$b/movie/$u/$p/${pathEnc(it.id)}.${it.ext.ifBlank { "mp4" }}"
         }
     }
 }

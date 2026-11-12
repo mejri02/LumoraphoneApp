@@ -12,7 +12,7 @@ data class Source(
     val url: String,
     val user: String = "",
     val pass: String = "",
-    val format: String = "m3u8"
+    val format: String = "auto"
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("type", type)
         .put("url", url).put("user", user).put("pass", pass).put("format", format)
@@ -20,7 +20,7 @@ data class Source(
     companion object {
         fun from(o: JSONObject) = Source(
             o.getString("id"), o.optString("name"), o.optString("type", "xtream"), o.optString("url"),
-            o.optString("user"), o.optString("pass"), o.optString("format", "m3u8")
+            o.optString("user"), o.optString("pass"), o.optString("format", "auto")
         )
     }
 }
@@ -183,6 +183,21 @@ object Store {
             a.put(JSONObject().put("item", it.item.toJson()).put("count", it.count))
         }
         sp.edit().putString(sourceKey("views", srcId), a.toString()).apply()
+    }
+
+    /**
+     * Removes every per-source list (favorites, progress, views) for a deleted source, and also
+     * strips its entries from the legacy global lists so they cannot be migrated back later.
+     */
+    fun removeSourceData(srcId: String) {
+        sp.edit()
+            .remove(sourceKey("favs", srcId))
+            .remove(sourceKey("progress", srcId))
+            .remove(sourceKey("views", srcId))
+            .apply()
+        saveFavs(favs().filterNot { it.srcId == srcId })
+        saveProgress(progress().filterNot { it.item.srcId == srcId })
+        saveViews(views().filterNot { it.item.srcId == srcId })
     }
 
     fun progress(): MutableList<Progress> {

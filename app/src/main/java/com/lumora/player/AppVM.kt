@@ -3,6 +3,9 @@
 package com.lumora.player
 
 import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Environment
 import androidx.compose.runtime.getValue
@@ -28,10 +31,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 
@@ -45,9 +50,9 @@ val ITEM_SORTS = listOf("latest" to "Latest", "oldest" to "Oldest", "rating" to 
 
 fun fmtBytes(b: Long): String = when {
     b <= 0L -> "—"
-    b >= 1073741824L -> "%.2f GB".format(b / 1073741824.0)
-    b >= 1048576L -> "%.1f MB".format(b / 1048576.0)
-    else -> "%d KB".format(b / 1024)
+    b >= 1073741824L -> "%.2f GB".format(Locale.US, b / 1073741824.0)
+    b >= 1048576L -> "%.1f MB".format(Locale.US, b / 1048576.0)
+    else -> "%d KB".format(Locale.US, b / 1024)
 }
 
 fun AppVM.locked(group: String): Boolean = pin.isNotEmpty() && !unlocked && ADULT.containsMatchIn(group)
@@ -105,6 +110,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     // Full UI theme; index 0 preserves the original Lumora appearance.
     var themeIdx by mutableStateOf(Store.getString("uiTheme", "0").toIntOrNull()?.coerceIn(0, THEME_COUNT - 1) ?: 0)
     var castOn by mutableStateOf(Store.getBool("castOn", true))
+    var autoNext by mutableStateOf(Store.getBool("autoNext", true))
+    var keepOn by mutableStateOf(Store.getBool("keepOn", true))
+    var gridSize by mutableStateOf(Store.getString("grid", "1").toIntOrNull()?.coerceIn(0, 2) ?: 1)
+    var wifiOnly by mutableStateOf(Store.getBool("wifiOnly", false))
+    var speed by mutableStateOf(Store.getString("speed", "1").toFloatOrNull()?.coerceIn(0.5f, 2f) ?: 1f)
 
     // ---------- player state: lives here so playback keeps going when minimized or in picture-in-picture ----------
     var exo: ExoPlayer? = null
@@ -117,6 +127,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     private var playerItem: Item? = null
     private var playerKind = ""
     private var playerRetries = 0
+    private var liveAutoRetryCount = 0
+    private var liveFormatFallbackUsed = false
     private var resumeAt = 0L
     private var resumed = false
 
@@ -175,6 +187,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         episodesLoading = false
         openGroup = null
         playList = emptyList()
+        unlocked = false
     }
 
     fun saveSource(s: Source) {
@@ -189,6 +202,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteSource(id: String) {
+        // Remove cached lists and per-source favorites/progress so a later re-add starts clean.
+        CatalogCache.clearSource(id)
+        Store.removeSourceData(id)
         sources.removeAll { it.id == id }
         Store.saveSources(sources)
         if (activeSrc == id) selectSource(sources.firstOrNull()?.id ?: "")
@@ -348,10 +364,21 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------- favorites ----------
-    fun isFav(it: Item) = favs.any { f -> f.key == it.key }
+    fun isFav(it: Item): Boolean =
+        if (it.srcId.isBlank() || it.srcId == activeSrc) favs.any { f -> f.key == it.key }
+        else Store.favsFor(it.srcId).any { f -> f.key == it.key }
 
     fun toggleFav(it: Item) {
-        if (it.srcId.isBlank() || it.srcId != activeSrc) return
+        if (it.srcId.isBlank()) return
+        if (it.srcId != activeSrc) {
+            // Offline files opened from Downloads keep the account id they were downloaded from.
+            if (srcOf(it.srcId) == null) return
+            val list = Store.favsFor(it.srcId).toMutableList()
+            val i = list.indexOfFirst { f -> f.key == it.key }
+            if (i >= 0) list.removeAt(i) else list.add(0, it)
+            Store.saveFavsFor(it.srcId, list)
+            return
+        }
         val i = favs.indexOfFirst { f -> f.key == it.key }
         if (i >= 0) favs.removeAt(i) else favs.add(0, it)
         Store.saveFavsFor(activeSrc, favs)
@@ -441,6 +468,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun play(it: Item) {
         val s = srcOf(it.srcId) ?: src() ?: return
+        liveFormatFallbackUsed = false
+        liveAutoRetryCount = 0
         bumpView(it)
         playOrCast(PlayReq(Xtream.resolve(s, it), it.name, it.kind, it, s))
     }
@@ -515,24 +544,55 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     }
                     playerError = ""
                     playerRetries = 0
+                } else if (state == Player.STATE_ENDED && exo === p) {
+                    buffering = false
+                    // The episode is fully watched: clear its progress, then queue the next one.
+                    saveCurrentProgress()
+                    autoAdvance(playerItem)
                 }
             }
 
             override fun onIsPlayingChanged(v: Boolean) {
                 isPlaying = v
+                if (v && exo === p) {
+                    // A successful recovery means the next interruption gets a fresh retry budget.
+                    liveAutoRetryCount = 0
+                    playerRetries = 0
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // Xtream providers are inconsistent: some serve live channels only as TS,
+                // others only as HLS. Try the other standard extension once before retries.
+                val currentReq = playing
+                val liveItem = playerItem
+                val liveSource = currentReq?.src
+                if (!liveFormatFallbackUsed && playerKind == "live" && liveItem != null && liveSource != null && liveSource.type == "xtream") {
+                    val alternate = Xtream.alternateLive(liveSource, liveItem)
+                    if (alternate.isNotBlank() && exo === p) {
+                        liveFormatFallbackUsed = true
+                        viewModelScope.launch {
+                            if (exo === p) {
+                                val next = currentReq.copy(url = alternate)
+                                playing = next
+                                releasePlayer()
+                                ensurePlayer(next)
+                            }
+                        }
+                        return
+                    }
+                }
                 // Keep retries asynchronous so the UI thread stays responsive, and show a
                 // useful reason once automatic retries have been exhausted.
                 playerError = friendlyPlaybackError(error)
-                if (playerRetries < 3) {
+                val maxRetries = if (playerKind == "live") 5 else 3
+                if (playerRetries < maxRetries) {
                     playerRetries++
-                    val wait = (900L * playerRetries).coerceAtMost(3000L)
+                    val wait = (1000L * playerRetries).coerceAtMost(5000L)
                     viewModelScope.launch {
                         delay(wait)
-                        if (exo === p && playerError.isNotEmpty()) try {
-                            playerError = "Reconnecting…"
+                        if (exo === p && playerError.isNotEmpty() && p.playWhenReady) try {
+                            playerError = "Reconnecting… ($playerRetries/$maxRetries)"
                             p.prepare()
                             p.play()
                         } catch (_: Exception) {
@@ -544,10 +604,68 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 }
             }
         })
+        p.setPlaybackSpeed(speed)
         p.setMediaItem(MediaItem.fromUri(req.url))
         p.playWhenReady = true
         p.prepare()
         exo = p
+
+        // Some IPTV servers silently stop sending data without raising a player error.
+        // Watch live playback for a prolonged stall and reconnect automatically.
+        if (req.kind == "live") {
+            viewModelScope.launch {
+                var lastPosition = -1L
+                var unchangedSince = 0L
+                while (exo === p && playing?.url == req.url) {
+                    delay(5000L)
+                    if (exo !== p || playing?.url != req.url) break
+                    if (!p.playWhenReady) {
+                        lastPosition = p.currentPosition
+                        unchangedSince = 0L
+                        continue
+                    }
+                    val position = p.currentPosition
+                    val activelyPlaying = p.isPlaying
+                    if (activelyPlaying) {
+                        lastPosition = position
+                        unchangedSince = 0L
+                        continue
+                    }
+                    if (p.playbackState == Player.STATE_READY || p.playbackState == Player.STATE_BUFFERING) {
+                        if (lastPosition < 0L || position != lastPosition) {
+                            lastPosition = position
+                            unchangedSince = System.currentTimeMillis()
+                        } else if (unchangedSince == 0L) {
+                            unchangedSince = System.currentTimeMillis()
+                        } else if (System.currentTimeMillis() - unchangedSince >= 20000L) {
+                            if (liveAutoRetryCount < 5) {
+                                liveAutoRetryCount++
+                                playerError = "Live stream stopped. Reconnecting… ($liveAutoRetryCount/5)"
+                                buffering = true
+                                delay((1000L * liveAutoRetryCount).coerceAtMost(5000L))
+                                if (exo === p && playing?.url == req.url && p.playWhenReady) {
+                                    try {
+                                        p.prepare()
+                                        p.play()
+                                        lastPosition = p.currentPosition
+                                        unchangedSince = System.currentTimeMillis()
+                                    } catch (_: Exception) {
+                                        playerError = "Live reconnection failed"
+                                    }
+                                }
+                            } else {
+                                playerError = "Live stream stopped after 5 reconnection attempts. Tap Retry to try again."
+                                buffering = false
+                                break
+                            }
+                        }
+                    } else {
+                        lastPosition = position
+                        unchangedSince = 0L
+                    }
+                }
+            }
+        }
     }
 
     fun releasePlayer() {
@@ -555,9 +673,23 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         exo?.release()
         exo = null
         playerUrl = ""
+        playerItem = null
+        playerKind = ""
         isPlaying = false
         buffering = true
         playerError = ""
+    }
+
+    /** Plays the next episode of the open series when the current one ends (setting: auto-next). */
+    private fun autoAdvance(finished: Item?) {
+        if (!autoNext || finished == null || finished.kind != "ep") return
+        val serie = detail ?: return
+        val idx = episodes.indexOfFirst { it.id == finished.id }
+        if (idx < 0) return
+        val next = episodes.getOrNull(idx + 1) ?: return
+        if (next.id == finished.id) return
+        playEpisode(serie, next)
+        message = "Next episode"
     }
 
     fun saveCurrentProgress() {
@@ -651,22 +783,38 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     // ---------- continue watching ----------
     fun saveProgress(item: Item, pos: Long, dur: Long) {
-        if (item.srcId.isBlank() || item.srcId != activeSrc) return
-        if (item.kind == "live" || pos < 8_000L) return
+        if (item.srcId.isBlank() || item.kind == "live" || pos < 8_000L) return
         val finished = dur > 0 && pos > dur * 0.95
-        progress.removeAll { p -> p.item.key == item.key }
-        if (!finished) progress.add(0, Progress(item, pos, dur, System.currentTimeMillis()))
-        Store.saveProgressFor(activeSrc, progress)
+        val entry = Progress(item, pos, dur, System.currentTimeMillis())
+        if (item.srcId == activeSrc) {
+            progress.removeAll { p -> p.item.key == item.key }
+            if (!finished) progress.add(0, entry)
+            Store.saveProgressFor(activeSrc, progress)
+        } else {
+            // Offline plays carry the id of the account they came from; remember them there.
+            val list = Store.progressFor(item.srcId).toMutableList()
+            list.removeAll { p -> p.item.key == item.key }
+            if (!finished) list.add(0, entry)
+            Store.saveProgressFor(item.srcId, list)
+        }
     }
 
-    fun progressOf(item: Item): Long? = progress.firstOrNull { p -> p.item.key == item.key }?.pos?.takeIf { it > 0 }
+    fun progressOf(item: Item): Long? {
+        val p = if (item.srcId.isBlank() || item.srcId == activeSrc) progress.firstOrNull { x -> x.item.key == item.key }
+        else Store.progressFor(item.srcId).firstOrNull { x -> x.item.key == item.key }
+        return p?.pos?.takeIf { it > 0 }
+    }
 
     fun continueWatching(): List<Progress> = progress.take(20)
 
     fun removeProgress(item: Item) {
-        if (item.srcId.isBlank() || item.srcId != activeSrc) return
-        progress.removeAll { p -> p.item.key == item.key }
-        Store.saveProgressFor(activeSrc, progress)
+        if (item.srcId.isBlank()) return
+        if (item.srcId == activeSrc) {
+            progress.removeAll { p -> p.item.key == item.key }
+            Store.saveProgressFor(activeSrc, progress)
+        } else {
+            Store.saveProgressFor(item.srcId, Store.progressFor(item.srcId).filterNot { p -> p.item.key == item.key })
+        }
     }
 
     fun clearProgress() {
@@ -703,6 +851,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             val size = if (f.exists()) f.length() else 0L
             dlInfo[d.item.key] = if (d.done && f.exists()) {
                 DlInfo("Ready offline", 100, size, size, true, false)
+            } else if (d.done) {
+                DlInfo("File missing · tap to download again", 0, 0L, d.total, false, false, true)
             } else {
                 val pct = if (d.total > 0L) ((size * 100) / d.total).toInt().coerceIn(0, 100) else 0
                 DlInfo("Paused · tap to resume", pct, size, d.total, false, false, true)
@@ -713,10 +863,25 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     /** The download button: starts, pauses while running, resumes when paused or failed. */
     fun download(item: Item) {
         val key = item.key
-        val d = downloads.firstOrNull { x -> x.item.key == key }
+        var current = downloads.firstOrNull { x -> x.item.key == key }
+        // A "ready" record whose file was deleted externally must be downloadable again.
+        if (current != null && current.done && !File(current.path).exists()) {
+            downloads.removeAll { x -> x.item.key == key }
+            Store.saveDownloads(downloads)
+            dlInfo.remove(key)
+            current = null
+        }
+        val d = current
         when {
             d == null -> {
-                if ((srcOf(item.srcId) ?: src()) == null) return
+                if (srcOf(item.srcId) == null) {
+                    message = "This title's source was removed"
+                    return
+                }
+                if (wifiOnly && !onWifi()) {
+                    message = "Wi-Fi only downloads are on. Connect to Wi-Fi or turn it off in Settings."
+                    return
+                }
                 val ext = item.ext.ifBlank { "mp4" }
                 val base = item.name.replace(Regex("[^A-Za-z0-9._-]+"), "_").trim('_').take(60).ifBlank { "video" }
                 val file = File(dlDir(), base + "_" + item.kind + item.id + "_" + (item.srcId.hashCode() and 0x7fffffff) + "." + ext)
@@ -729,15 +894,32 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             d.done -> message = "Already downloaded"
             dlJobs[key]?.isActive == true -> pauseDownload(d)
             else -> {
+                if (wifiOnly && !onWifi()) {
+                    message = "Wi-Fi only downloads are on. Connect to Wi-Fi or turn it off in Settings."
+                    return
+                }
                 startDownload(d)
                 message = "Download resumed"
             }
         }
     }
 
+    /** True when the phone is on Wi-Fi/Ethernet. Unknown states are treated as allowed. */
+    private fun onWifi(): Boolean {
+        return try {
+            val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return true
+            val net = cm.activeNetwork ?: return false
+            val cap = cm.getNetworkCapabilities(net) ?: return false
+            cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || cap.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        } catch (_: Exception) {
+            true
+        }
+    }
+
     private fun startDownload(d: Download) {
         val key = d.item.key
-        val s = srcOf(d.item.srcId) ?: src()
+        val s = srcOf(d.item.srcId)
         if (s == null) {
             setDl(key, DlInfo("Source missing", 0, 0L, 0L, false, true))
             return
@@ -753,6 +935,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val key = d.item.key
         var attempt = 0
         while (true) {
+            // Do not spend mobile data when the Wi-Fi-only setting is on; the tap resumes later.
+            if (wifiOnly && !onWifi()) {
+                val size = if (file.exists()) file.length() else 0L
+                dlPaused.add(key)
+                setDl(key, DlInfo("Waiting for Wi-Fi · tap to resume", 0, size, d.total, false, false, true))
+                return
+            }
             try {
                 downloadOnce(d, url, file, key)
                 return
@@ -919,6 +1108,214 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         Store.saveFavsFor(activeSrc, favs)
     }
 
+    fun changeAutoNext(v: Boolean) {
+        autoNext = v
+        Store.putBool("autoNext", v)
+    }
+
+    fun changeKeepOn(v: Boolean) {
+        keepOn = v
+        Store.putBool("keepOn", v)
+    }
+
+    fun changeGridSize(i: Int) {
+        gridSize = i.coerceIn(0, 2)
+        Store.putString("grid", gridSize.toString())
+    }
+
+    fun changeWifiOnly(v: Boolean) {
+        wifiOnly = v
+        Store.putBool("wifiOnly", v)
+        message = if (v) "Downloads will wait for Wi-Fi" else "Downloads can now use mobile data"
+    }
+
+    fun changeSpeed(v: Float) {
+        speed = v.coerceIn(0.5f, 2f)
+        Store.putString("speed", speed.toString())
+        try {
+            exo?.setPlaybackSpeed(speed)
+        } catch (_: Exception) {
+        }
+    }
+
+    fun cycleSpeed() {
+        changeSpeed(when (speed) {
+            1.25f -> 1.5f
+            1.5f -> 2f
+            2f -> 0.75f
+            0.75f -> 1f
+            else -> 1.25f
+        })
+    }
+
+    fun speedLabel(): String = if (speed == speed.toInt().toFloat()) "${speed.toInt()}x" else "${speed}x"
+
+    // ---------- backup: one JSON file with sources, favorites, progress, views and settings ----------
+    fun exportBackup(): String {
+        val root = JSONObject()
+        root.put("app", "lumora")
+        root.put("version", 1)
+        root.put("exportedAt", System.currentTimeMillis())
+        val srcArr = JSONArray()
+        sources.forEach { srcArr.put(it.toJson()) }
+        root.put("sources", srcArr)
+        val favArr = JSONArray()
+        val progArr = JSONArray()
+        val viewArr = JSONArray()
+        for (s in sources) {
+            Store.favsFor(s.id).forEach { favArr.put(it.toJson()) }
+            Store.progressFor(s.id).forEach {
+                progArr.put(JSONObject().put("item", it.item.toJson()).put("pos", it.pos).put("dur", it.dur).put("ts", it.ts))
+            }
+            Store.viewsFor(s.id).forEach { v -> viewArr.put(JSONObject().put("item", v.item.toJson()).put("count", v.count)) }
+        }
+        root.put("favorites", favArr)
+        root.put("progress", progArr)
+        root.put("views", viewArr)
+        root.put("settings", JSONObject()
+            .put("activeSrc", activeSrc)
+            .put("refreshH", refreshHours)
+            .put("sort", sort)
+            .put("itemSort", itemSort)
+            .put("resume", resumeOn)
+            .put("pin", pin)
+            .put("accent", accentIdx)
+            .put("uiTheme", themeIdx)
+            .put("castOn", castOn)
+            .put("autoNext", autoNext)
+            .put("keepOn", keepOn)
+            .put("grid", gridSize)
+            .put("wifiOnly", wifiOnly)
+            .put("speed", speed.toDouble()))
+        return root.toString(2)
+    }
+
+    /** Replaces the current data with a previously exported backup. Returns the number of sources. */
+    fun restoreBackup(text: String): Int {
+        val root = try {
+            JSONObject(text)
+        } catch (_: Exception) {
+            throw IOException("The selected file is not valid JSON")
+        }
+        if (root.optString("app") != "lumora") throw IOException("This is not a Lumora backup file")
+        val arr = root.optJSONArray("sources") ?: throw IOException("The backup contains no sources")
+        val restored = ArrayList<Source>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val s = try {
+                Source.from(o)
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            if (s.id.isNotBlank() && restored.none { it.id == s.id }) restored.add(s)
+        }
+        if (restored.isEmpty()) throw IOException("The backup contains no valid sources")
+
+        root.optJSONObject("settings")?.let { st ->
+            val h = st.optInt("refreshH", refreshHours)
+            changeRefresh(if (h in listOf(0, 3, 6, 12, 24)) h else 6)
+            changeSort(if (st.optString("sort") == "az") "az" else "count")
+            val srt = st.optString("itemSort")
+            changeItemSort(if (srt in setOf("latest", "oldest", "rating", "name")) srt else "latest")
+            setResume(st.optBoolean("resume", resumeOn))
+            val p = st.optString("pin").filter { it.isDigit() }.take(4)
+            if (p.isEmpty() || p.length == 4) changePin(p)
+            changeAccent(st.optInt("accent", accentIdx))
+            changeTheme(st.optInt("uiTheme", themeIdx))
+            changeCastOn(st.optBoolean("castOn", castOn))
+            changeAutoNext(st.optBoolean("autoNext", autoNext))
+            changeKeepOn(st.optBoolean("keepOn", keepOn))
+            changeGridSize(st.optInt("grid", gridSize))
+            changeWifiOnly(st.optBoolean("wifiOnly", wifiOnly))
+            changeSpeed(st.optDouble("speed", speed.toDouble()).toFloat())
+        }
+
+        sources.clear()
+        sources.addAll(restored)
+        Store.saveSources(sources)
+
+        val ids = restored.map { it.id }.toSet()
+        val favMap = HashMap<String, MutableList<Item>>()
+        val progMap = HashMap<String, MutableList<Progress>>()
+        val viewMap = HashMap<String, MutableList<Viewed>>()
+        val fa = root.optJSONArray("favorites") ?: JSONArray()
+        for (i in 0 until fa.length()) {
+            val it = try {
+                Item.from(fa.optJSONObject(i) ?: JSONObject())
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            if (it.srcId !in ids) continue
+            favMap.getOrPut(it.srcId) { mutableListOf() }.add(it)
+        }
+        val pa = root.optJSONArray("progress") ?: JSONArray()
+        for (i in 0 until pa.length()) {
+            val o = pa.optJSONObject(i) ?: continue
+            val it = try {
+                Item.from(o.optJSONObject("item") ?: JSONObject())
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            if (it.srcId !in ids) continue
+            progMap.getOrPut(it.srcId) { mutableListOf() }
+                .add(Progress(it, o.optLong("pos", 0L), o.optLong("dur", 0L), o.optLong("ts", 0L)))
+        }
+        val va = root.optJSONArray("views") ?: JSONArray()
+        for (i in 0 until va.length()) {
+            val o = va.optJSONObject(i) ?: continue
+            val it = try {
+                Item.from(o.optJSONObject("item") ?: JSONObject())
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            if (it.srcId !in ids) continue
+            viewMap.getOrPut(it.srcId) { mutableListOf() }.add(Viewed(it, o.optInt("count", 1)))
+        }
+        for (s in restored) {
+            Store.saveFavsFor(s.id, favMap[s.id].orEmpty())
+            Store.saveProgressFor(s.id, progMap[s.id].orEmpty())
+            Store.saveViewsFor(s.id, viewMap[s.id].orEmpty())
+        }
+        val want = root.optJSONObject("settings")?.optString("activeSrc").orEmpty()
+        selectSource(if (want in ids) want else restored.first().id)
+        message = "Backup restored: ${restored.size} source(s)"
+        return restored.size
+    }
+
+    fun backupTo(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val txt = exportBackup()
+                withContext(Dispatchers.IO) {
+                    val out = getApplication<Application>().contentResolver.openOutputStream(uri)
+                        ?: throw IOException("Cannot open the selected file")
+                    out.use {
+                        it.write(txt.toByteArray(Charsets.UTF_8))
+                        it.flush()
+                    }
+                }
+                message = "Backup saved (${sources.size} source(s))"
+            } catch (e: Exception) {
+                message = "Backup failed: ${e.message ?: "unknown error"}"
+            }
+        }
+    }
+
+    fun restoreFrom(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val txt = withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver.openInputStream(uri)
+                        ?.bufferedReader()?.use { it.readText() }
+                        ?: throw IOException("Cannot open the selected file")
+                }
+                restoreBackup(txt)
+            } catch (e: Exception) {
+                message = "Restore failed: ${e.message ?: "unknown error"}"
+            }
+        }
+    }
+
     // ---------- startup and background work ----------
     init {
         restoreDownloads()
@@ -930,5 +1327,21 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 if (n % 5 == 0) saveCurrentProgress()
             }
         }
+    }
+
+    override fun onCleared() {
+        // The ViewModel can outlive the Activity, but when it really goes away, stop network work.
+        try {
+            saveCurrentProgress()
+        } catch (_: Exception) {
+        }
+        dlCalls.values.forEach { runCatching { it.cancel() } }
+        dlJobs.values.forEach { it.cancel() }
+        try {
+            exo?.release()
+        } catch (_: Exception) {
+        }
+        exo = null
+        super.onCleared()
     }
 }

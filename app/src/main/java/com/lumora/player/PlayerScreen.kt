@@ -40,7 +40,7 @@ fun fmtTime(ms: Long): String {
     val h = t / 3600
     val m = (t % 3600) / 60
     val s = t % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+    return if (h > 0) "%d:%02d:%02d".format(Locale.US, h, m, s) else "%d:%02d".format(Locale.US, m, s)
 }
 
 @Composable
@@ -73,7 +73,6 @@ fun PlayerPane(
     var show by remember { mutableStateOf(true) }
     var tick by remember { mutableIntStateOf(0) }
     var resize by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
-    var speed by remember { mutableFloatStateOf(1f) }
     var pos by remember(req.url) { mutableLongStateOf(0L) }
     var dur by remember(req.url) { mutableLongStateOf(0L) }
     var drag by remember { mutableStateOf<Float?>(null) }
@@ -82,13 +81,14 @@ fun PlayerPane(
     var subtitleFile by remember(req.url) { mutableStateOf<File?>(null) }
     var subtitleOffset by remember(req.url) { mutableIntStateOf(0) }
     var subtitleStatus by remember { mutableStateOf("") }
-    var subtitleQuery by remember(req.url) { mutableStateOf(req.title) }
-    var subtitleLang by remember { mutableStateOf("ar") }
     val subtitlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             try {
-                val file = File(ctx.cacheDir, "subtitle_${System.currentTimeMillis()}.srt")
-                ctx.contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } }
+                val name = uri.lastPathSegment.orEmpty()
+                val ext = if (name.substringAfterLast('.', "").equals("vtt", true)) "vtt" else "srt"
+                val file = File(ctx.cacheDir, "subtitle_${System.currentTimeMillis()}.$ext")
+                val input = ctx.contentResolver.openInputStream(uri) ?: throw java.io.IOException("cannot open the file")
+                input.use { inp -> file.outputStream().use { inp.copyTo(it) } }
                 subtitleFile = file
                 subtitleOffset = 0
                 subtitleStatus = "Subtitle loaded: ${file.name}"
@@ -134,13 +134,14 @@ fun PlayerPane(
                 PlayerView(c).apply {
                     this.player = exo
                     useController = false
-                    keepScreenOn = true
+                    keepScreenOn = vm.keepOn
                     resizeMode = resize
                 }
             },
             update = {
                 it.player = exo
                 it.resizeMode = resize
+                it.keepScreenOn = vm.keepOn
             }
         )
 
@@ -262,12 +263,11 @@ fun PlayerPane(
                     Spacer(Modifier.weight(1f))
                     if (!live) TextButton(
                         onClick = {
-                            speed = when (speed) { 1f -> 1.25f; 1.25f -> 1.5f; 1.5f -> 2f; 2f -> 0.75f; else -> 1f }
-                            exo.setPlaybackSpeed(speed)
+                            vm.cycleSpeed()
                             tick++
                         },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                    ) { Text(speed.toString().removeSuffix(".0") + "x", color = Color.White, fontSize = 13.sp) }
+                    ) { Text(vm.speedLabel(), color = Color.White, fontSize = 13.sp) }
                     if (!live) CtrlBtn(Icons.Default.Subtitles, "Subtitles", 40) { showSubtitles = true; show = true }
                     CtrlBtn(Icons.Default.AspectRatio, "Aspect", 40) {
                         resize = when (resize) {
@@ -308,16 +308,15 @@ fun PlayerPane(
     }
 }
 
-
-
 private fun applySubtitleFile(player: androidx.media3.exoplayer.ExoPlayer, videoUrl: String, original: File, offsetMs: Int) {
     try {
         val raw = original.readText(Charsets.UTF_8)
         val shifted = shiftSubtitleTimestamps(raw, offsetMs)
-        val ext = original.extension.lowercase(Locale.ROOT)
-        val out = File(original.parentFile, "${original.nameWithoutExtension}_offset_${offsetMs}.${if (ext == "vtt") "vtt" else "srt"}")
+        // Trust the file content as well as the extension: some pickers report a generic name.
+        val isVtt = original.extension.equals("vtt", true) || raw.trimStart().startsWith("WEBVTT", ignoreCase = true)
+        val out = File(original.parentFile, "${original.nameWithoutExtension}_offset_${offsetMs}.${if (isVtt) "vtt" else "srt"}")
         out.writeText(shifted, Charsets.UTF_8)
-        val mime = if (ext == "vtt") "text/vtt" else "application/x-subrip"
+        val mime = if (isVtt) "text/vtt" else "application/x-subrip"
         val config = androidx.media3.common.MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(out))
             .setMimeType(mime).setLanguage("und").setSelectionFlags(androidx.media3.common.C.SELECTION_FLAG_DEFAULT).build()
         val item = androidx.media3.common.MediaItem.Builder().setUri(videoUrl).setSubtitleConfigurations(listOf(config)).build()
@@ -330,13 +329,21 @@ private fun applySubtitleFile(player: androidx.media3.exoplayer.ExoPlayer, video
 }
 
 private fun shiftSubtitleTimestamps(text: String, offsetMs: Int): String {
-    val regex = Regex("(?m)(\\d{2}:\\d{2}:\\d{2}[,.]\\d{3})")
+    // Standard SRT/VTT timestamps are HH:MM:SS,mmm, but some files use MM:SS,mmm.
+    val regex = Regex("(?m)(?<!\\d)(?:(\\d{1,2}):)?(\\d{1,2}):(\\d{2})[,.](\\d{3})")
     return regex.replace(text) { match ->
-        val parts = match.value.replace(',', '.').split(':')
-        val secParts = parts[2].split('.')
-        val millis = ((parts[0].toLong() * 3600 + parts[1].toLong() * 60 + secParts[0].toLong()) * 1000 + secParts[1].toLong() + offsetMs).coerceAtLeast(0L)
-        val h = millis / 3600000; val m = (millis % 3600000) / 60000; val sec = (millis % 60000) / 1000; val ms = millis % 1000
+        val hadHours = match.groupValues[1].isNotEmpty()
+        val h0 = match.groupValues[1].toLongOrNull() ?: 0L
+        val m0 = match.groupValues[2].toLong()
+        val s0 = match.groupValues[3].toLong()
+        val ms0 = match.groupValues[4].toLong()
+        val millis = ((h0 * 3600 + m0 * 60 + s0) * 1000 + ms0 + offsetMs).coerceAtLeast(0L)
+        val h = millis / 3600000
+        val m = (millis % 3600000) / 60000
+        val sec = (millis % 60000) / 1000
+        val ms = millis % 1000
         val separator = if (match.value.contains('.')) '.' else ','
-        "%02d:%02d:%02d%s%03d".format(h, m, sec, separator, ms)
+        if (hadHours || h > 0) "%02d:%02d:%02d%s%03d".format(Locale.US, h, m, sec, separator, ms)
+        else "%02d:%02d%s%03d".format(Locale.US, m, sec, separator, ms)
     }
 }

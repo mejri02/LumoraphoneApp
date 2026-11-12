@@ -13,9 +13,11 @@ object CatalogCache {
         if (dir == null) dir = File(c.filesDir, "catalog").apply { mkdirs() }
     }
 
+    private fun safe(v: String) = v.replace(Regex("[^A-Za-z0-9_-]"), "_")
+
     private fun file(src: String, kind: String): File? {
         val d = dir ?: return null
-        return File(d, src.replace(Regex("[^A-Za-z0-9_-]"), "_") + "_" + kind + ".tsv")
+        return File(d, safe(src) + "_" + kind + ".tsv")
     }
 
     fun time(src: String, kind: String): Long {
@@ -36,7 +38,7 @@ object CatalogCache {
                     sb.append(clean(it.id)).append('\t').append(clean(it.name)).append('\t').append(clean(it.group)).append('\t')
                         .append(clean(it.logo)).append('\t').append(it.kind).append('\t').append(clean(it.ext)).append('\t')
                         .append(if (it.url == it.id) "@" else clean(it.url)).append('\t').append(it.srcId).append('\t')
-                        .append(it.season).append('\t').append(it.num).append('\t').append(it.added).append('\t').append(it.rating)
+                        .append(it.season).append('\t').append(it.num).append('\t').append(it.added).append('\t').append(it.rating.toString().replace(',', '.'))
                     sb.append('\n')
                     w.write(sb.toString())
                 }
@@ -60,7 +62,7 @@ object CatalogCache {
                     out.add(
                         Item(
                             id, p[1], p[2], p[3], p[4], p[5], if (p[6] == "@") id else p[6], p[7],
-                            p[8].toIntOrNull() ?: 0, p[9].toIntOrNull() ?: 0, p[10].toLongOrNull() ?: 0L, p[11].toDoubleOrNull() ?: 0.0
+                            p[8].toIntOrNull() ?: 0, p[9].toIntOrNull() ?: 0, p[10].toLongOrNull() ?: 0L, p[11].replace(',', '.').toDoubleOrNull() ?: 0.0
                         )
                     )
                 }
@@ -73,5 +75,11 @@ object CatalogCache {
 
     fun clear() {
         dir?.listFiles()?.forEach { it.delete() }
+    }
+
+    /** Removes every cached list that belongs to one source (all kinds and old credential hashes). */
+    fun clearSource(srcId: String) {
+        val prefix = safe(srcId) + "_"
+        dir?.listFiles()?.forEach { if (it.name.startsWith(prefix)) it.delete() }
     }
 }

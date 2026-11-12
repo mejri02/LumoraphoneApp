@@ -23,6 +23,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -341,6 +342,12 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
     var listsOpen by rememberSaveable { mutableStateOf(false) }
     var browseOpen by rememberSaveable { mutableStateOf(false) }
     var playOpen by rememberSaveable { mutableStateOf(false) }
+    val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) vm.backupTo(uri)
+    }
+    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.restoreFrom(uri)
+    }
     BackHandler { vm.showSettings = false }
     Column(Modifier.fillMaxSize().themeBackground().blockTouches().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -425,11 +432,35 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                     FilterChip(vm.sort == "az", { vm.changeSort("az") }, { Text("A-Z") })
                 }
             }
+            if (browseOpen) item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Poster size", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(listOf(0 to "Compact", 1 to "Normal", 2 to "Large")) { (size, label) ->
+                            FilterChip(vm.gridSize == size, { vm.changeGridSize(size) }, { Text(label) })
+                        }
+                    }
+                }
+            }
             item {
                 CollapseHeader("Playback", (if (vm.resumeOn) "Resume on" else "Resume off") + " · " + (if (vm.castOn) "TV cast on" else "TV cast off"), playOpen) { playOpen = !playOpen }
             }
             if (playOpen) item { SwitchRow("Resume where I stopped", vm.resumeOn) { v -> vm.setResume(v) } }
+            if (playOpen) item { SwitchRow("Play next episode automatically", vm.autoNext) { v -> vm.changeAutoNext(v) } }
+            if (playOpen) item { SwitchRow("Keep the screen on while playing", vm.keepOn) { v -> vm.changeKeepOn(v) } }
             if (playOpen) item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.changeCastOn(v) } }
+            if (playOpen) item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Default playback speed", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(listOf(0.75f, 1f, 1.25f, 1.5f, 2f)) { v ->
+                            FilterChip(vm.speed == v, { vm.changeSpeed(v) }, {
+                                Text(if (v == v.toInt().toFloat()) "${v.toInt()}x" else "${v}x")
+                            })
+                        }
+                    }
+                }
+            }
             item {
                 val cur = when (vm.themeIdx) {
                     0 -> "Original · Cinema Dark"; 1 -> "Midnight Blue"; 2 -> "Light Premium"
@@ -464,6 +495,8 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             item { SettingHeader("Subtitles") }
             item { Text("Load subtitle files (.srt or .vtt) directly from the player. No API key or online account is needed.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, modifier = Modifier.padding(4.dp)) }
             item { SettingHeader("Downloads (offline)") }
+            item { SwitchRow("Download only on Wi-Fi", vm.wifiOnly) { v -> vm.changeWifiOnly(v) } }
+            item { Text("Saves mobile data. A download waits (or pauses if the network drops) until Wi-Fi is back, then continues when you tap it.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
             if (vm.downloads.isEmpty()) item { Text("No downloads yet. Open a movie or episode and tap Download.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
             items(vm.downloads.toList()) { d -> DownloadRow(vm, d) }
             item { SettingHeader("Parental control") }
@@ -476,8 +509,11 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             item { SettingHeader("Data") }
             item { ActionRow("Clear continue watching", "Removes saved progress") { vm.clearProgress() } }
             item { ActionRow("Clear favorites", "Removes all favorites") { vm.clearFavs() } }
+            item { SettingHeader("Backup") }
+            item { ActionRow("Export backup", "Save sources, favorites, progress and settings as a JSON file") { exportPicker.launch("lumora-backup.json") } }
+            item { ActionRow("Restore backup", "Replace this phone's Lumora data with a backup file") { importPicker.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) } }
             item { SettingHeader("About") }
-            item { Text("Lumora 1.6.0", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(4.dp)) }
+            item { Text("Lumora 1.6.1", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(4.dp)) }
         }
     }
     if (pinDialog) PinDialog(vm) { pinDialog = false }
@@ -652,8 +688,10 @@ fun SourceForm(vm: AppVM, start: Source, close: () -> Unit) {
                         visualTransformation = PasswordVisualTransformation()
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        FilterChip(format == "m3u8", { format = "m3u8" }, { Text("HLS (m3u8)") })
-                        Spacer(Modifier.width(8.dp))
+                        FilterChip(format == "auto", { format = "auto" }, { Text("Auto") })
+                        Spacer(Modifier.width(6.dp))
+                        FilterChip(format == "m3u8", { format = "m3u8" }, { Text("HLS") })
+                        Spacer(Modifier.width(6.dp))
                         FilterChip(format == "ts", { format = "ts" }, { Text("MPEG-TS") })
                     }
                 }

@@ -40,19 +40,17 @@ Lumora gives you a clean, fast interface for managing your own IPTV sources and 
 - Continue watching for movies and episodes, with progress bars and resume.
 - Most viewed channels, and new releases.
 - Series episodes, with saved positions.
-- Playback speed control (0.5x to 2x) and automatic stream recovery.
-- Live "Now / Next" program info and TV guide (EPG) support.
-- Subtitles: load your own `.srt` or `.vtt` file, with sync adjustment. Optional OpenSubtitles search (API key stored encrypted with Android Keystore).
+- Playback speed control (0.75x to 2x) with a saved default, automatic stream recovery, and auto-play of the next episode.
+- Subtitles: load your own `.srt` or `.vtt` file, with sync adjustment and automatic format detection.
 
 **Downloads**
-- Download movies and episodes for offline viewing.
-- Manage downloads in Settings.
+- Download movies and episodes for offline viewing, with pause/resume.
+- Optional Wi-Fi-only downloads, and management in Settings.
 
 **Personalization**
 - Several color themes and an accent color choice.
-- Sort categories by item count or A to Z.
-- Favorites per account.
-- Arabic and English interface, with full right-to-left support.
+- Sort categories by item count or A to Z, and choose compact, normal, or large posters.
+- Favorites per account, and keep the screen awake while playing.
 
 **Parental controls**
 - Adult categories can be locked behind a 4-digit PIN.
@@ -63,8 +61,8 @@ Lumora gives you a clean, fast interface for managing your own IPTV sources and 
 
 **Settings and data**
 - Back button navigates through screens, sheets, and dialogs.
-- Backup export and import (JSON). The backup contains passwords, so keep it private.
-- Clear data option.
+- Backup export and import (JSON): sources, favorites, continue watching, and settings. The backup contains passwords, so keep it private.
+- Clear saved lists, progress, or favorites.
 
 ## Apps in this repository
 
@@ -88,8 +86,7 @@ Lumora gives you a clean, fast interface for managing your own IPTV sources and 
 ## Privacy
 
 - Your sources, favorites, watch progress, and settings are stored on your device.
-- The OpenSubtitles API key is encrypted locally with Android Keystore (AES-GCM).
-- The app connects only to the servers you configure, plus the public EPG source used for the built-in guide.
+- The app connects only to the IPTV servers you configure.
 
 ## Disclaimer
 
