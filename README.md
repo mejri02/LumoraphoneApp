@@ -11,8 +11,10 @@ Lumore gives you a fast, good-looking interface for your own IPTV service — li
 series from Xtream Codes, a Stalker portal or an M3U/M3U8 playlist. Lumore does not provide, host
 or distribute any channels, movies or subscriptions.
 
-## Highlights in 1.8.0
+## Highlights in 1.8.1
 
+- **Animated launch screen** — the Lumore mark, word mark and the "Developed by Mejri02" credit
+  on a dark stage, with a soft breathing glow.
 - **Four completely different interface families** — Classic (the original look), plus brand-new
   **Cinema**, **Glass** and **Neon** home screens with their own navigation, cards and artwork.
 - **Three new themes** — Lumore Aurora (soft light glass), Lumore Cinema (warm widescreen) and

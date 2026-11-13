@@ -104,16 +104,28 @@ class MainActivity : ComponentActivity() {
         setContent {
             val accent = Color(vm.accentInt())
             val spec = themeAt(vm.themeIdx, accent)
+            var splash by rememberSaveable { mutableStateOf(true) }
             // Status/navigation bar icons must follow the theme brightness, not the system setting.
+            // During the dark splash every icon stays light.
             val view = LocalView.current
             SideEffect {
                 val c = WindowCompat.getInsetsController(window, view)
-                c.isAppearanceLightStatusBars = spec.isLight
-                c.isAppearanceLightNavigationBars = spec.isLight
+                c.isAppearanceLightStatusBars = if (splash) false else spec.isLight
+                c.isAppearanceLightNavigationBars = if (splash) false else spec.isLight
             }
             CompositionLocalProvider(LocalThemeSpec provides spec) {
                 MaterialTheme(colorScheme = spec.scheme) {
-                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Root(vm) }
+                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        Box(Modifier.fillMaxSize()) {
+                            Root(vm)
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = splash,
+                                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(380))
+                            ) {
+                                SplashScreen { splash = false }
+                            }
+                        }
+                    }
                 }
             }
         }

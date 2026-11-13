@@ -1,4 +1,4 @@
-Lumore — IPTV Player 1.8.0
+Lumore — IPTV Player 1.8.1
 Designed & developed by Mejri02.
 
 A modern IPTV player for Android and Android TV. Connect your own Xtream Codes account,
