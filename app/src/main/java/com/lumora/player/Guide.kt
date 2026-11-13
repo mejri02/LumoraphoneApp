@@ -22,10 +22,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.xmlpull.v1.XmlPullParser
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,7 +53,7 @@ private suspend fun loadBeinGuide(): GuideData = withContext(Dispatchers.IO) {
     val connection = (URL(BEIN_EPG_URL).openConnection() as HttpURLConnection).apply {
         connectTimeout = 15000
         readTimeout = 25000
-        setRequestProperty("User-Agent", "LumoraTV/1.0")
+        setRequestProperty("User-Agent", "Lumore/1.7")
     }
     try {
         connection.inputStream.use { input ->
@@ -110,27 +112,43 @@ fun GuideTab() {
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("All") }
     var refreshKey by remember { mutableIntStateOf(0) }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var updatedAt by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            now = System.currentTimeMillis()
+        }
+    }
     LaunchedEffect(refreshKey) {
         loading = true
         error = null
-        try { data = loadBeinGuide() } catch (e: Exception) { error = e.message ?: "Unable to load the guide" }
-        finally { loading = false }
+        try {
+            data = loadBeinGuide()
+            updatedAt = System.currentTimeMillis()
+        } catch (e: Exception) {
+            error = if (e is IOException) Net.friendly(e) else (e.message ?: "Unable to load the guide")
+        } finally { loading = false }
     }
-    val now = System.currentTimeMillis()
+    val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val channels = data?.channels.orEmpty().filter {
         (filter == "All" || it.name.contains(filter, ignoreCase = true)) &&
             (query.isBlank() || it.name.contains(query, ignoreCase = true))
     }
-    // Group once per download instead of scanning every programme for every channel on each recomposition.
-    val byChannel = remember(data) { data?.programmes.orEmpty().groupBy { it.channelId } }
-    val programmeMap = remember(byChannel, now / 60_000L) {
-        byChannel.mapValues { (_, list) -> list.filter { it.stop > now }.sortedBy { it.start }.take(4) }
+    val programmeMap = remember(data, now) {
+        data?.channels.orEmpty().associate { ch ->
+            ch.id to data!!.programmes.filter { it.channelId == ch.id && it.stop > now }.sortedBy { it.start }.take(4)
+        }
     }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("beIN Sports Guide", fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                Text("Programme schedule · MENA", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (updatedAt > 0L) "MENA schedule · updated " + SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(updatedAt))
+                    else "Programme schedule · MENA",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             IconButton(onClick = { refreshKey++ }, enabled = !loading) {
                 if (loading) CircularProgressIndicator(Modifier.size(21.dp), strokeWidth = 2.dp)
@@ -148,7 +166,7 @@ fun GuideTab() {
                 Text(error.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 Button(onClick = { refreshKey++ }, Modifier.padding(top = 12.dp)) { Text("Try again") }
             }
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + nav), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                 items(channels, key = { it.id }) { channel ->
                     val schedule = programmeMap[channel.id].orEmpty()
@@ -162,10 +180,8 @@ fun GuideTab() {
                         if (schedule.isEmpty()) Text("No upcoming programme data", Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         else schedule.forEachIndexed { index, programme ->
                             val isNow = programme.start <= now && programme.stop > now
-                            val time = remember(programme.start, programme.stop) {
-                                val fmt = SimpleDateFormat("HH:mm", Locale.getDefault())
-                                fmt.format(Date(programme.start)) + " – " + fmt.format(Date(programme.stop))
-                            }
+                            val fmt = SimpleDateFormat("HH:mm", Locale.getDefault())
+                            val time = fmt.format(Date(programme.start)) + " – " + fmt.format(Date(programme.stop))
                             Row(Modifier.fillMaxWidth().padding(top = 9.dp).then(if (isNow) Modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)).padding(7.dp) else Modifier), verticalAlignment = Alignment.CenterVertically) {
                                 Text(time, Modifier.width(104.dp), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Column(Modifier.weight(1f)) {

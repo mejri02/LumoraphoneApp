@@ -116,6 +116,51 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var wifiOnly by mutableStateOf(Store.getBool("wifiOnly", false))
     var speed by mutableStateOf(Store.getString("speed", "1").toFloatOrNull()?.coerceIn(0.5f, 2f) ?: 1f)
 
+    // ---------- new 1.8 UI options ----------
+    /** fit | zoom | fill — remembered between sessions. */
+    var aspectMode by mutableStateOf(Store.getString("aspect", "fit"))
+
+    fun cycleAspect() {
+        aspectMode = when (aspectMode) {
+            "fit" -> "zoom"
+            "zoom" -> "fill"
+            else -> "fit"
+        }
+        Store.putString("aspect", aspectMode)
+    }
+
+    fun aspectLabel(): String = when (aspectMode) {
+        "zoom" -> "Zoom to fill"
+        "fill" -> "Stretch"
+        else -> "Fit to screen"
+    }
+
+    /** Opens the TV guide as a full-screen overlay (used by the Neon home layout). */
+    var guideOpen by mutableStateOf(false)
+    fun openGuide() { guideOpen = true }
+    fun closeGuide() { guideOpen = false }
+
+    /** Last searches, newest first, stored as a single escaped preference string. */
+    var recentSearches by mutableStateOf(loadRecentSearches())
+        private set
+
+    private fun loadRecentSearches(): List<String> =
+        Store.getString("recentSearches", "").split('\u0001').map { it.trim() }.filter { it.isNotEmpty() }.take(8)
+
+    fun addRecentSearch(q: String) {
+        val v = q.trim()
+        if (v.length < 2) return
+        val next = (listOf(v) + recentSearches.filterNot { it.equals(v, true) }).take(8)
+        recentSearches = next
+        Store.putString("recentSearches", next.joinToString("\u0001"))
+    }
+
+    fun clearRecentSearches() {
+        recentSearches = emptyList()
+        Store.putString("recentSearches", "")
+        message = "Search history cleared"
+    }
+
     // ---------- sleep timer: pauses playback after the chosen number of minutes ----------
     var sleepAt by mutableStateOf(0L)
     private var sleepJob: Job? = null
@@ -162,6 +207,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         progress.addAll(Store.progressFor(activeSrc))
         viewed.addAll(Store.viewsFor(activeSrc))
         downloads.addAll(Store.downloads())
+        // One-time copy of the legacy global lists into per-source lists.
+        Store.migrate(activeSrc)
     }
 
     fun src(): Source? = sources.firstOrNull { it.id == activeSrc } ?: sources.firstOrNull()
@@ -196,6 +243,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun selectSource(id: String) {
         activeSrc = id
+        Store.migrate(id)
         Store.putString("activeSrc", id)
         favs.clear()
         favs.addAll(Store.favsFor(id))
@@ -228,7 +276,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun deleteSource(id: String) {
         // Remove cached lists and per-source favorites/progress so a later re-add starts clean.
+        val gone = sources.firstOrNull { it.id == id }
         CatalogCache.clearSource(id)
+        if (gone != null) CatalogCache.clearSource(cacheKey(gone))
         Store.removeSourceData(id)
         sources.removeAll { it.id == id }
         Store.saveSources(sources)

@@ -13,7 +13,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -50,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -100,28 +103,16 @@ class MainActivity : ComponentActivity() {
         ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(PIP_ACTION), ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent {
             val accent = Color(vm.accentInt())
-            val scheme = when (vm.themeIdx) {
-                1 -> darkColorScheme(
-                    primary = accent, onPrimary = Color.White, secondary = Color(0xFF64B5F6),
-                    background = Color(0xFF06111F), surface = Color(0xFF0B1B2D),
-                    onSurface = Color(0xFFE8F2FF), onBackground = Color(0xFFE8F2FF),
-                    surfaceVariant = Color(0xFF152B43), onSurfaceVariant = Color(0xFFB7CBE0)
-                )
-                2 -> lightColorScheme(
-                    primary = accent, onPrimary = Color.White, secondary = Color(0xFF52627A),
-                    background = Color(0xFFF7F8FC), surface = Color.White,
-                    onSurface = Color(0xFF202432), onBackground = Color(0xFF202432),
-                    surfaceVariant = Color(0xFFE9ECF4), onSurfaceVariant = Color(0xFF50586B)
-                )
-                else -> darkColorScheme(
-                    primary = accent, onPrimary = Color.White, secondary = accent,
-                    background = Color(0xFF09090E), surface = Color(0xFF13131A),
-                    onSurface = Color(0xFFEDEFF5), onBackground = Color(0xFFEDEFF5), surfaceVariant = Color(0xFF1D1D27)
-                )
+            val spec = themeAt(vm.themeIdx, accent)
+            // Status/navigation bar icons must follow the theme brightness, not the system setting.
+            val view = LocalView.current
+            SideEffect {
+                val c = WindowCompat.getInsetsController(window, view)
+                c.isAppearanceLightStatusBars = spec.isLight
+                c.isAppearanceLightNavigationBars = spec.isLight
             }
-            val spec = IMAGE_THEMES.getOrNull(vm.themeIdx - BASE_THEMES)
             CompositionLocalProvider(LocalThemeSpec provides spec) {
-                MaterialTheme(colorScheme = spec?.scheme ?: scheme) {
+                MaterialTheme(colorScheme = spec.scheme) {
                     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Root(vm) }
                 }
             }
@@ -204,16 +195,11 @@ class MainActivity : ComponentActivity() {
 fun TopBar(vm: AppVM, onRemote: () -> Unit, onCast: () -> Unit, onDownloads: () -> Unit) {
     val primary = MaterialTheme.colorScheme.primary
     Row(
-        Modifier.fillMaxWidth().background(if (LocalThemeSpec.current?.img != null) Color.Transparent else MaterialTheme.colorScheme.background).statusBarsPadding()
+        Modifier.fillMaxWidth().background(if (LocalThemeSpec.current?.painted == true) Color.Transparent else MaterialTheme.colorScheme.background).statusBarsPadding()
             .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(Brush.linearGradient(listOf(primary, accent2()))),
-            contentAlignment = Alignment.Center
-        ) { Text("L", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 19.sp) }
-        Spacer(Modifier.width(10.dp))
-        Text("Lumora", fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        BrandMark(size = 34.dp)
         Spacer(Modifier.weight(1f))
         val tv = TvLink.activeTv()
         if (tv != null) IconButton(onClick = onRemote, modifier = Modifier.size(42.dp)) { Icon(Icons.Default.SettingsRemote, "Remote") }
@@ -238,6 +224,52 @@ fun TopBar(vm: AppVM, onRemote: () -> Unit, onCast: () -> Unit, onDownloads: () 
     }
 }
 
+/** Horizontal tab strip used by the layouts that do not show a bottom navigation bar. */
+@Composable
+fun TopTabs(selected: Int, items: List<Triple<String, ImageVector, Int>>, onSelect: (Int) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        items.forEach { (label, icon, i) ->
+            val on = selected == i
+            Row(
+                Modifier.weight(1f).clip(RoundedCornerShape(LocalThemeSpec.current?.corner?.times(0.7f) ?: 12.dp))
+                    .background(
+                        if (on) Brush.horizontalGradient(listOf(MaterialTheme.colorScheme.primary, accent2()))
+                        else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                    )
+                    .clickable { onSelect(i) }.padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(icon, null, tint = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    label, fontSize = 12.sp,
+                    color = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        }
+    }
+}
+
+/** Full-screen TV guide overlay (the guide itself lives in Guide.kt). */
+@Composable
+fun GuideScreen(vm: AppVM) {
+    BackHandler { vm.closeGuide() }
+    Column(Modifier.fillMaxSize().themeBackground().blockTouches().statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { vm.closeGuide() }) { Icon(Icons.Default.ArrowBack, "Back") }
+            Column(Modifier.weight(1f)) {
+                Text("TV Guide", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("beIN Sports · live schedule", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        GuideTab()
+    }
+}
+
 @Composable
 fun Root(vm: AppVM) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -255,6 +287,12 @@ fun Root(vm: AppVM) {
     }
     @Suppress("UNUSED_VARIABLE") val ver = TvLink.version.intValue
 
+    val layout = LocalThemeSpec.current?.layout ?: UiLayout.CLASSIC
+    val navItems = listOf(
+        Triple("Home", Icons.Default.Home, 0), Triple("Catalog", Icons.Default.VideoLibrary, 1),
+        Triple("Favorites", Icons.Default.Star, 2), Triple("Search", Icons.Default.Search, 3),
+        Triple("Guide", Icons.Default.Event, 4)
+    )
     val act = LocalContext.current as? MainActivity
     LaunchedEffect(vm.playing, vm.isPlaying) { act?.refreshPip() }
     val pipReq = vm.playing
@@ -266,23 +304,25 @@ fun Root(vm: AppVM) {
     }
 
     Box(Modifier.fillMaxSize()) {
-        val themed = LocalThemeSpec.current?.img != null
+        val themed = LocalThemeSpec.current?.painted == true
         Scaffold(
             modifier = Modifier.themeBackground(),
             containerColor = if (themed) Color.Transparent else MaterialTheme.colorScheme.background,
-            topBar = { TopBar(vm, onRemote = { remoteSheet = true }, onCast = { castSheet = true }, onDownloads = { vm.showDownloads = true }) },
+            topBar = {
+                Column {
+                    TopBar(vm, onRemote = { remoteSheet = true }, onCast = { castSheet = true }, onDownloads = { vm.showDownloads = true })
+                    if (layout == UiLayout.CINEMA || layout == UiLayout.NEON) TopTabs(tab, navItems) { tab = it }
+                }
+            },
             bottomBar = {
-                NavigationBar(containerColor = if (themed) MaterialTheme.colorScheme.surface.copy(alpha = 0.92f) else if (vm.themeIdx == 0) Color(0xFF0F0F15) else MaterialTheme.colorScheme.surface) {
-                    val navItems = listOf(
-                        Triple("Home", Icons.Default.Home, 0), Triple("Catalog", Icons.Default.VideoLibrary, 1),
-                        Triple("Favorites", Icons.Default.Star, 2), Triple("Search", Icons.Default.Search, 3),
-                        Triple("Guide", Icons.Default.Event, 4)
-                    )
-                    navItems.forEach { (label, icon, i) ->
-                        NavigationBarItem(
-                            tab == i, { tab = i }, { Icon(icon, null) }, label = { Text(label, fontSize = 11.sp) },
-                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
-                        )
+                if (layout == UiLayout.CLASSIC || layout == UiLayout.GLASS) {
+                    NavigationBar(containerColor = if (themed) MaterialTheme.colorScheme.surface.copy(alpha = 0.92f) else MaterialTheme.colorScheme.surface) {
+                        navItems.forEach { (label, icon, i) ->
+                            NavigationBarItem(
+                                tab == i, { tab = i }, { Icon(icon, null) }, label = { Text(label, fontSize = 11.sp) },
+                                colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                            )
+                        }
                     }
                 }
             }
@@ -298,6 +338,7 @@ fun Root(vm: AppVM) {
             }
         }
 
+        if (vm.guideOpen) GuideScreen(vm)
         vm.openGroup?.let { CategoryScreen(vm, it) }
         if (!vm.minimized) vm.detail?.let { DetailScreen(vm, it) }
         if (vm.showSettings) SettingsScreen(vm, onEdit = { form = it })
@@ -306,8 +347,9 @@ fun Root(vm: AppVM) {
         if (remoteSheet) RemoteSheet { remoteSheet = false }
         vm.actionItem?.let { ItemActions(vm, it) }
         if (vm.showDownloads) DownloadsScreen(vm)
-        if (vm.minimized && vm.playing != null) MiniPlayer(vm, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 80.dp))
-        SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 76.dp))
+        val bottomPad = if (layout == UiLayout.CINEMA || layout == UiLayout.NEON) 14.dp else 80.dp
+        if (vm.minimized && vm.playing != null) MiniPlayer(vm, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = bottomPad))
+        SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = bottomPad))
     }
 }
 
@@ -453,6 +495,18 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
             if (playOpen) item { SwitchRow("Play on TV when it is connected", vm.castOn) { v -> vm.changeCastOn(v) } }
             if (playOpen) item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Video size in the player", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(listOf("fit" to "Fit", "zoom" to "Zoom", "fill" to "Stretch")) { (mode, label) ->
+                            FilterChip(vm.aspectMode == mode, {
+                                while (vm.aspectMode != mode) vm.cycleAspect()
+                            }, { Text(label) })
+                        }
+                    }
+                }
+            }
+            if (playOpen) item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Default playback speed", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(listOf(0.75f, 1f, 1.25f, 1.5f, 2f)) { v ->
@@ -464,10 +518,7 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                 }
             }
             item {
-                val cur = when (vm.themeIdx) {
-                    0 -> "Original · Cinema Dark"; 1 -> "Midnight Blue"; 2 -> "Light Premium"
-                    else -> IMAGE_THEMES.getOrNull(vm.themeIdx - BASE_THEMES)?.name ?: ""
-                }
+                val cur = themeAt(vm.themeIdx, Color(vm.accentInt())).name
                 CollapseHeader("Themes", cur, themesOpen) { themesOpen = !themesOpen }
             }
             if (themesOpen) item {
@@ -479,8 +530,15 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                         itemsIndexed(IMAGE_THEMES) { i, t ->
                             ThemeThumb(t.name, t.img, t.scheme.background, vm.themeIdx == BASE_THEMES + i) { vm.changeTheme(BASE_THEMES + i) }
                         }
+                        itemsIndexed(NEW_THEMES) { i, t ->
+                            ThemeThumb(
+                                t.name, t.img, t.scheme.background,
+                                vm.themeIdx == BASE_THEMES + IMAGE_THEMES.size + i,
+                                gradient = t.gradient
+                            ) { vm.changeTheme(BASE_THEMES + IMAGE_THEMES.size + i) }
+                        }
                     }
-                    Text("Changes the app background, cards and text colors. Your original theme remains available.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Themes also change the home-screen layout (Classic, Cinema, Glass or Neon). Your original theme remains available.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (themesOpen) item {
@@ -534,8 +592,20 @@ fun SettingsScreen(vm: AppVM, onEdit: (Source) -> Unit) {
                 val version = remember {
                     try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName.orEmpty() } catch (_: Exception) { "" }
                 }
-                Text("Lumora $version", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(4.dp))
+                Column(Modifier.fillMaxWidth().padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    BrandMark(size = 46.dp, subtitle = "IPTV PLAYER")
+                    Spacer(Modifier.height(8.dp))
+                    Text("Lumore $version", fontWeight = FontWeight.SemiBold)
+                    Text("Designed & developed by Mejri02", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                    Text(
+                        "Your playlists and credentials stay on this device. No ads, no analytics.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(top = 6.dp, start = 12.dp, end = 12.dp)
+                    )
+                }
             }
+            item { ActionRow("Clear search history", "Forgets your recent searches") { vm.clearRecentSearches() } }
             item {
                 val ctx = LocalContext.current
                 val crash = remember { java.io.File(ctx.filesDir, "crash.log") }
@@ -572,7 +642,7 @@ fun ConfirmDialog(title: String, text: String, label: String, onConfirm: () -> U
 
 /** Small preview card for a theme: its picture (or plain color) with the name under it. */
 @Composable
-fun ThemeThumb(name: String, img: Int?, color: Color, selected: Boolean, onClick: () -> Unit) {
+fun ThemeThumb(name: String, img: Int?, color: Color, selected: Boolean, gradient: List<Color>? = null, onClick: () -> Unit) {
     val border = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Column(Modifier.width(84.dp).clickable { onClick() }, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(

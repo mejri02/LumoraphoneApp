@@ -122,6 +122,7 @@ object Store {
     private fun sourceKey(base: String, srcId: String) = "${base}_source_${srcId}"
 
     fun favsFor(srcId: String): MutableList<Item> {
+        if (srcId.isBlank()) return mutableListOf()
         val key = sourceKey("favs", srcId)
         if (sp.contains(key)) {
             val out = mutableListOf<Item>()
@@ -132,7 +133,6 @@ object Store {
             return out
         }
         return favs().filter { it.srcId == srcId && srcId.isNotBlank() }.toMutableList()
-            .also { saveFavsFor(srcId, it) }
     }
 
     fun saveFavsFor(srcId: String, l: List<Item>) {
@@ -142,6 +142,7 @@ object Store {
     }
 
     fun progressFor(srcId: String): MutableList<Progress> {
+        if (srcId.isBlank()) return mutableListOf()
         val key = sourceKey("progress", srcId)
         if (sp.contains(key)) {
             val out = mutableListOf<Progress>()
@@ -154,7 +155,6 @@ object Store {
             return out
         }
         return progress().filter { it.item.srcId == srcId && srcId.isNotBlank() }.toMutableList()
-            .also { saveProgressFor(srcId, it) }
     }
 
     fun saveProgressFor(srcId: String, l: List<Progress>) {
@@ -167,6 +167,7 @@ object Store {
     }
 
     fun viewsFor(srcId: String): MutableList<Viewed> {
+        if (srcId.isBlank()) return mutableListOf()
         val key = sourceKey("views", srcId)
         if (sp.contains(key)) {
             val out = mutableListOf<Viewed>()
@@ -178,7 +179,6 @@ object Store {
             return out
         }
         return views().filter { it.item.srcId == srcId && srcId.isNotBlank() }.toMutableList()
-            .also { saveViewsFor(srcId, it) }
     }
 
     fun saveViewsFor(srcId: String, l: List<Viewed>) {
@@ -188,6 +188,20 @@ object Store {
         }
         sp.edit().putString(sourceKey("views", srcId), a.toString()).apply()
     }
+
+    /**
+     * Copies the old global lists into the per-source keys once. Safe to call on every start:
+     * after the keys exist it returns immediately. Removes hidden writes from the getters.
+     */
+    fun migrate(srcId: String) {
+        if (srcId.isBlank() || !::sp.isInitialized) return
+        if (!sp.contains(sourceKey("favs", srcId))) saveFavsFor(srcId, favs().filter { it.srcId == srcId })
+        if (!sp.contains(sourceKey("progress", srcId))) saveProgressFor(srcId, progress().filter { it.item.srcId == srcId })
+        if (!sp.contains(sourceKey("views", srcId))) saveViewsFor(srcId, views().filter { it.item.srcId == srcId })
+    }
+
+    /** True once [init] has run; used to fail gracefully instead of crashing. */
+    fun ready(): Boolean = ::sp.isInitialized
 
     /**
      * Removes every per-source list (favorites, progress, views) for a deleted source, and also
@@ -261,18 +275,22 @@ object Store {
         sp.edit().putString("downloads", a.toString()).apply()
     }
 
-    fun getBool(k: String, d: Boolean): Boolean = sp.getBoolean(k, d)
+    fun getBool(k: String, d: Boolean): Boolean =
+        if (::sp.isInitialized) sp.getBoolean(k, d) else d
+
     fun putBool(k: String, v: Boolean) {
-        sp.edit().putBoolean(k, v).apply()
+        if (::sp.isInitialized) sp.edit().putBoolean(k, v).apply()
     }
 
-    fun getString(k: String, d: String = ""): String = sp.getString(k, d) ?: d
+    fun getString(k: String, d: String = ""): String =
+        if (::sp.isInitialized) sp.getString(k, d) ?: d else d
+
     fun putString(k: String, v: String) {
-        sp.edit().putString(k, v).apply()
+        if (::sp.isInitialized) sp.edit().putString(k, v).apply()
     }
 
     /** Synchronous write, so the value is on disk when this returns (used for pairing data). */
     fun putStringNow(k: String, v: String) {
-        sp.edit().putString(k, v).commit()
+        if (::sp.isInitialized) sp.edit().putString(k, v).commit()
     }
 }

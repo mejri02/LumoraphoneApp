@@ -5,6 +5,7 @@ package com.lumora.player
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -44,15 +45,46 @@ fun HomeTab(vm: AppVM, onSeeAll: () -> Unit, onAddSource: () -> Unit) {
         vm.load("vod")
         vm.load("series")
     }
-    // Adult categories stay hidden on the home page until the PIN has been entered.
-    val cw = vm.continueWatching().filter { p -> !vm.locked(p.item.group) }
+    when (currentLayout()) {
+        UiLayout.CINEMA -> HomeCinema(vm, onSeeAll, onAddSource)
+        UiLayout.GLASS -> HomeGlass(vm, onSeeAll, onAddSource)
+        UiLayout.NEON -> HomeNeon(vm, onSeeAll, onAddSource)
+        else -> HomeClassic(vm, onSeeAll, onAddSource)
+    }
+}
+
+private data class HomeData(
+    val cw: List<Progress>,
+    val live: List<Item>,
+    val vod: List<Item>,
+    val ser: List<Item>,
+    val channels: List<Item>,
+    val movies: List<Item>,
+    val shows: List<Item>
+)
+
+private fun homeData(vm: AppVM): HomeData {
+    val live = vm.catalog["live"].orEmpty()
+    val vod = vm.catalog["vod"].orEmpty()
+    val ser = vm.catalog["series"].orEmpty()
+    return HomeData(
+        cw = vm.continueWatching(),
+        live = live, vod = vod, ser = ser,
+        channels = vm.mostViewed().map { it.item }.ifEmpty { live.take(12) },
+        movies = vod.sortedByDescending { it.added }.take(14),
+        shows = ser.sortedByDescending { it.added }.take(14)
+    )
+}
+
+@Composable
+private fun HomeClassic(vm: AppVM, onSeeAll: () -> Unit, onAddSource: () -> Unit) {
+    val cw = vm.continueWatching()
     val live = vm.catalog["live"]
     val vod = vm.catalog["vod"]
     val ser = vm.catalog["series"]
-    val channels = vm.mostViewed().map { v -> v.item }.filter { !vm.locked(it.group) }
-        .ifEmpty { (live ?: emptyList()).filter { !vm.locked(it.group) }.take(12) }
-    val movies = remember(vod, vm.pin, vm.unlocked) { (vod ?: emptyList()).filter { !vm.locked(it.group) }.sortedByDescending { m -> m.added }.take(14) }
-    val shows = remember(ser, vm.pin, vm.unlocked) { (ser ?: emptyList()).filter { !vm.locked(it.group) }.sortedByDescending { m -> m.added }.take(14) }
+    val channels = vm.mostViewed().map { v -> v.item }.ifEmpty { (live ?: emptyList()).take(12) }
+    val movies = remember(vod) { (vod ?: emptyList()).sortedByDescending { m -> m.added }.take(14) }
+    val shows = remember(ser) { (ser ?: emptyList()).sortedByDescending { m -> m.added }.take(14) }
     val busy = vm.isLoading("live") || vm.isLoading("vod") || vm.isLoading("series")
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -63,7 +95,7 @@ fun HomeTab(vm: AppVM, onSeeAll: () -> Unit, onAddSource: () -> Unit) {
                     .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), accent2().copy(alpha = 0.25f))))
                     .padding(22.dp)
             ) {
-                Text("Welcome to Lumora", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("Welcome to Lumore", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text("Add your Xtream or M3U source to start watching.", Modifier.padding(top = 6.dp, bottom = 14.dp), color = Color(0xFFD5D7E0))
                 Button(onClick = onAddSource) { Text("Add source") }
             }
@@ -136,8 +168,9 @@ fun buildGroups(all: List<Item>, sort: String): List<GroupInfo> {
     val counts = LinkedHashMap<String, Int>()
     val logos = HashMap<String, String>()
     for (it in all) {
-        counts[it.group] = (counts[it.group] ?: 0) + 1
-        if (!logos.containsKey(it.group) && it.logo.startsWith("http")) logos[it.group] = it.logo
+        val g = groupName(it.group)
+        counts[g] = (counts[g] ?: 0) + 1
+        if (!logos.containsKey(g) && it.logo.startsWith("http")) logos[g] = it.logo
     }
     val list = counts.map { e -> GroupInfo(e.key, e.value, logos[e.key] ?: "") }
     return if (sort == "az") list.sortedBy { g -> g.name.lowercase() } else list.sortedByDescending { g -> g.count }
@@ -254,7 +287,7 @@ fun CatalogTab(vm: AppVM) {
         when {
             vm.src() == null -> EmptyState("No sources yet", "Open Settings and add a source")
             loading && all.isEmpty() -> Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            all.isEmpty() -> EmptyState("Nothing here yet", "Could not load this list", "Retry") { vm.load(kind, true) }
+            all.isEmpty() -> EmptyState("Nothing here yet", "Could not load this list", "Retry", onAction = { vm.load(kind, true) })
             else -> {
                 val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp + nav)) {
@@ -281,12 +314,9 @@ fun CategoryScreen(vm: AppVM, ref: GroupRef) {
     var q by remember(ref) { mutableStateOf("") }
     var channelSort by rememberSaveable(ref.kind, ref.name) { mutableStateOf("name") }
     var favoritesOnly by rememberSaveable(ref.kind, ref.name) { mutableStateOf(false) }
-    // "All titles" must not expose adult categories while the PIN lock is active.
-    val base = remember(all, ref, vm.pin, vm.unlocked) {
-        if (ref.name.isEmpty()) all.filter { !vm.locked(it.group) } else all.filter { it.group == ref.name }
-    }
+    val base = remember(all, ref) { if (ref.name.isEmpty()) all else all.filter { groupName(it.group) == ref.name } }
     val searched = remember(base, q) { if (q.isBlank()) base else base.filter { it.name.contains(q.trim(), ignoreCase = true) } }
-    val favoriteFiltered = remember(searched, favoritesOnly, vm.favs.size) {
+    val favoriteFiltered = remember(searched, favoritesOnly, vm.favs.toList()) {
         if (!favoritesOnly) searched else searched.filter { item -> vm.isFav(item) }
     }
     val list = remember(favoriteFiltered, channelSort) {
@@ -301,7 +331,7 @@ fun CategoryScreen(vm: AppVM, ref: GroupRef) {
             IconButton(onClick = { vm.openGroup = null }) { Icon(Icons.Default.ArrowBack, "Back") }
             Column(Modifier.weight(1f)) {
                 Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${base.size} items", fontSize = 12.sp, color = Color(0xFF8E92A0))
+                Text("${base.size} items", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         OutlinedTextField(
@@ -347,9 +377,7 @@ fun FavoritesTab(vm: AppVM) {
             EmptyState("No favorites yet", "Open any title and tap the star to keep it here")
         } else {
             SortPills(vm)
-            val visible = vm.favs.filter { !vm.locked(it.group) }
-            if (visible.isEmpty()) EmptyState("Favorites are locked", "Unlock the adult category to see them")
-            else PosterGrid(vm, visible, Modifier.weight(1f))
+            PosterGrid(vm, vm.favs.toList(), Modifier.weight(1f))
         }
     }
 }
@@ -404,6 +432,18 @@ fun SearchTab(vm: AppVM) {
                 unfocusedBorderColor = Color.Transparent
             )
         )
+        if (q.isBlank() && vm.recentSearches.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Recent", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                vm.recentSearches.forEach { r ->
+                    AssistChip(onClick = { q = r }, label = { Text(r, fontSize = 12.sp) })
+                }
+                TextButton(onClick = { vm.clearRecentSearches() }) { Text("Clear", fontSize = 12.sp) }
+            }
+        }
         if (q.trim().length < 2) EmptyState("Search everything", "Type at least 2 letters")
         else {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -423,7 +463,7 @@ fun SearchTab(vm: AppVM) {
             else {
                 val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                 LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp + nav), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(res, key = { it.key }) { it -> SearchRow(vm, it) }
+                    items(res, key = { it.key }) { it -> SearchRow(vm, it) { vm.addRecentSearch(dq) } }
                     if (total > res.size) item {
                         TextButton(onClick = { limit += 300 }, modifier = Modifier.fillMaxWidth()) { Text("Show more (${total - res.size})") }
                     }
@@ -434,12 +474,12 @@ fun SearchTab(vm: AppVM) {
 }
 
 @Composable
-private fun SearchRow(vm: AppVM, it: Item) {
+private fun SearchRow(vm: AppVM, it: Item, onOpen: () -> Unit = { vm.open(it) }) {
     val live = it.kind == "live"
-    Row(Modifier.fillMaxWidth().clickable { vm.open(it) }, verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clickable { onOpen() }, verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.width(if (live) 64.dp else 72.dp).aspectRatio(if (live) 1f else 2f / 3f)
-                .clip(RoundedCornerShape(12.dp)).background(Color(0xFF1A1A23))
+                .clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             if (it.logo.startsWith("http")) {
                 AsyncImage(
@@ -457,5 +497,230 @@ private fun SearchRow(vm: AppVM, it: Item) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)
             )
         }
+    }
+}
+
+// ======================= CINEMA / GLASS / NEON HOME LAYOUTS =======================
+
+@Composable
+private fun WideRail(vm: AppVM, items: List<Item>, kicker: String? = null) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(items, key = { it.key }) { item ->
+            WideCard(
+                item = item,
+                kicker = kicker ?: if (item.kind == "live") "LIVE" else null,
+                progress = vm.progress.firstOrNull { it.item.key == item.key }
+                    ?.let { p -> if (p.dur > 0) p.pos.toFloat() / p.dur.toFloat() else -1f } ?: -1f,
+                onClick = { vm.open(item, auto = true) }
+            )
+        }
+    }
+}
+
+/** Wide 16:9 artwork, a hero banner and generous rails. */
+@Composable
+private fun HomeCinema(vm: AppVM, onSeeAll: () -> Unit, onAddSource: () -> Unit) {
+    val h = homeData(vm)
+    val hero = h.movies.firstOrNull() ?: h.shows.firstOrNull() ?: h.channels.firstOrNull()
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+        if (vm.sources.isEmpty()) item {
+            EmptyState("Welcome to Lumore", "Add your Xtream or M3U source to start watching.", "Add source", onAddSource)
+        }
+        if (hero != null) item {
+            Box(Modifier.padding(16.dp)) {
+                HeroBanner(
+                    item = hero,
+                    kicker = if (hero.kind == "live") "Live on Lumore" else "Featured tonight",
+                    subtitle = listOf(hero.group, hero.plot).filter { it.isNotBlank() }.joinToString("  ·  "),
+                    onPlay = { vm.open(hero, auto = true) },
+                    onDetails = { vm.open(hero, auto = false) }
+                )
+            }
+        }
+        if (h.cw.isNotEmpty()) {
+            item { SectionHeader("Pick up where you left off", "All", onSeeAll) }
+            item { WideRail(vm, h.cw.map { it.item }) }
+        }
+        if (h.movies.isNotEmpty()) {
+            item { SectionHeader("Latest movies", "All", onSeeAll) }
+            item { WideRail(vm, h.movies) }
+        }
+        if (h.shows.isNotEmpty()) {
+            item { SectionHeader("Series to binge", "All", onSeeAll) }
+            item { WideRail(vm, h.shows) }
+        }
+        if (h.channels.isNotEmpty()) {
+            item { SectionHeader("Live channels", "All", onSeeAll) }
+            item { WideRail(vm, h.channels) }
+        }
+    }
+}
+
+/** Bright, list-first layout with soft glass cards. */
+@Composable
+private fun HomeGlass(vm: AppVM, onSeeAll: () -> Unit, onAddSource: () -> Unit) {
+    val h = homeData(vm)
+    val hour = remember { java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) }
+    val greeting = when {
+        hour < 12 -> "Good morning"
+        hour < 18 -> "Good afternoon"
+        else -> "Good evening"
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            GlassSurface(Modifier.fillMaxWidth(), RoundedCornerShape(LocalThemeSpec.current?.corner ?: 24.dp)) {
+                Text(greeting, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("What are we watching?", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 2.dp))
+                Text(
+                    "${vm.catalog["live"].orEmpty().size} channels · ${vm.catalog["vod"].orEmpty().size} movies · ${vm.catalog["series"].orEmpty().size} series",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+        }
+        if (vm.sources.isEmpty()) item {
+            EmptyState("No sources yet", "Connect an Xtream account or a playlist.", "Add source", onAddSource)
+        }
+        if (h.cw.isNotEmpty()) {
+            item { SectionHeader("Continue watching") }
+            items(h.cw.take(6)) { p ->
+                MediaRow(
+                    item = p.item,
+                    subtitle = if (p.dur > 0) "${((p.pos * 100) / p.dur).coerceIn(0L, 100L)}% watched" else "In progress",
+                    progress = if (p.dur > 0) p.pos.toFloat() / p.dur.toFloat() else -1f,
+                    onClick = { vm.open(p.item, auto = true) }
+                )
+            }
+        }
+        if (h.channels.isNotEmpty()) {
+            item { SectionHeader("Live now", "All", onSeeAll) }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(h.channels.take(14), key = { it.key }) { ch ->
+                        Column(Modifier.width(92.dp).clip(RoundedCornerShape(16.dp)).clickable { vm.open(ch) }) {
+                            Box(
+                                Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                if (ch.logo.startsWith("http")) AsyncImage(
+                                    model = ch.logo, contentDescription = ch.name, contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize().padding(6.dp)
+                                )
+                            }
+                            Text(ch.name, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp))
+                        }
+                    }
+                }
+            }
+        }
+        if (h.movies.isNotEmpty()) {
+            item { SectionHeader("Fresh movies", "All", onSeeAll) }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(h.movies, key = { it.key }) { m ->
+                        PosterCard(m, Modifier.width(112.dp), fav = vm.isFav(m), onClick = { vm.open(m) }, onLong = { vm.actionItem = m })
+                    }
+                }
+            }
+        }
+        if (h.shows.isNotEmpty()) {
+            item { SectionHeader("Series", "All", onSeeAll) }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(h.shows, key = { it.key }) { m ->
+                        PosterCard(m, Modifier.width(112.dp), fav = vm.isFav(m), onClick = { vm.open(m) }, onLong = { vm.actionItem = m })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Dark dashboard with big numbers and a live mosaic. */
+@Composable
+private fun HomeNeon(vm: AppVM, onSeeAll: () -> Unit, onAddSource: () -> Unit) {
+    val h = homeData(vm)
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 30.dp)) {
+        item {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Text("TONIGHT ON LUMORE", color = primary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text("Your library", fontSize = 30.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatTile("Channels", vm.catalog["live"].orEmpty().size.toString(), Icons.Default.LiveTv, primary, Modifier.weight(1f)) { onSeeAll() }
+                StatTile("Movies", vm.catalog["vod"].orEmpty().size.toString(), Icons.Default.Movie, secondary, Modifier.weight(1f)) { onSeeAll() }
+                StatTile("Series", vm.catalog["series"].orEmpty().size.toString(), Icons.Default.Subscriptions, Color(0xFF22D3EE), Modifier.weight(1f)) { onSeeAll() }
+            }
+        }
+        if (vm.sources.isEmpty()) item {
+            EmptyState("Welcome to Lumore", "Add your first source to light up the dashboard.", "Add source", onAddSource)
+        }
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                NeonAction("TV Guide", Icons.Default.CalendarMonth) { vm.openGuide() }
+                NeonAction("Downloads", Icons.Default.Download) { vm.showDownloads = true }
+                NeonAction("Favorites", Icons.Default.Star) { onSeeAll() }
+            }
+        }
+        if (h.channels.isNotEmpty()) {
+            item { SectionHeader("Always on", "All", onSeeAll) }
+            item {
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    h.channels.take(9).chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { ch ->
+                                Box(
+                                    Modifier.weight(1f).aspectRatio(1.25f).clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                        .border(1.dp, primary.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                                        .clickable { vm.open(ch) }
+                                ) {
+                                    if (ch.logo.startsWith("http")) AsyncImage(
+                                        model = ch.logo, contentDescription = ch.name, contentScale = ContentScale.Fit,
+                                        modifier = Modifier.fillMaxSize().padding(8.dp)
+                                    ) else Text(ch.name.take(2), Modifier.align(Alignment.Center), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+            }
+        }
+        if (h.movies.isNotEmpty()) {
+            item { SectionHeader("Blockbusters", "All", onSeeAll) }
+            item { WideRail(vm, h.movies) }
+        }
+        if (h.shows.isNotEmpty()) {
+            item { SectionHeader("Series", "All", onSeeAll) }
+            item { WideRail(vm, h.shows) }
+        }
+    }
+}
+
+@Composable
+private fun NeonAction(label: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .clickable { onClick() }.padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }

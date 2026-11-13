@@ -114,7 +114,7 @@ private fun ActionCell(icon: androidx.compose.ui.graphics.vector.ImageVector, la
     ) {
         Icon(icon, label, tint = tint, modifier = Modifier.size(24.dp))
         Spacer(Modifier.height(4.dp))
-        Text(label, fontSize = 11.sp, color = Color(0xFFB8BBC6))
+        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -154,7 +154,7 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
                     Column(Modifier.fillMaxWidth().statusBarsPadding().padding(top = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             Modifier.width(if (isLive) 170.dp else 200.dp).aspectRatio(if (isLive) 1f else 2f / 3f)
-                                .clip(RoundedCornerShape(22.dp)).background(Color(0xFF1C1C26)),
+                                .clip(RoundedCornerShape(22.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
                             if (poster.startsWith("http")) {
@@ -164,7 +164,7 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
                                     modifier = Modifier.fillMaxSize().then(if (isLive) Modifier.padding(20.dp) else Modifier)
                                 )
                             } else {
-                                Text(item.name.take(2).uppercase(), color = Color.Gray, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                                Text(item.name.take(2).uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -176,7 +176,7 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
                 }
             } else {
                 Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.width(60.dp).aspectRatio(if (isLive) 1f else 2f / 3f).clip(RoundedCornerShape(10.dp)).background(Color(0xFF1C1C26))) {
+                    Box(Modifier.width(60.dp).aspectRatio(if (isLive) 1f else 2f / 3f).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
                         if (poster.startsWith("http")) AsyncImage(
                             model = poster, contentDescription = null,
                             contentScale = if (isLive) ContentScale.Fit else ContentScale.Crop, modifier = Modifier.fillMaxSize()
@@ -199,7 +199,7 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
         if (!playing) item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (item.group.isNotBlank()) Text(
-                    item.group, fontSize = 12.sp, color = Color(0xFFB8BBC6), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    item.group, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 12.dp, vertical = 6.dp)
                 )
                 Spacer(Modifier.height(10.dp))
@@ -224,7 +224,7 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
                     val enabled = !isSeries || target != null
                     Box(
                         Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(16.dp))
-                            .background(if (enabled) Brush.horizontalGradient(listOf(primary, accent2())) else Brush.horizontalGradient(listOf(Color(0xFF2A2A33), Color(0xFF2A2A33))))
+                            .background(if (enabled) Brush.horizontalGradient(listOf(primary, accent2())) else Brush.horizontalGradient(listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surfaceVariant)))
                             .clickable(enabled = enabled) {
                                 if (isSeries) vm.nextEpisodeFor(item)?.let { e -> vm.playEpisode(item, e) } else vm.play(item)
                             },
@@ -246,9 +246,9 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
                     val fav = vm.isFav(item)
                     ActionCell(
                         if (fav) Icons.Default.Star else Icons.Default.StarBorder, if (fav) "Saved" else "Favorite",
-                        if (fav) Color(0xFFFBBF24) else Color.White, Modifier.weight(1f)
+                        if (fav) Color(0xFFFBBF24) else MaterialTheme.colorScheme.onSurface, Modifier.weight(1f)
                     ) { vm.toggleFav(item) }
-                    ActionCell(Icons.Default.Cast, "Cast to TV", if (TvLink.paired()) primary else Color.White, Modifier.weight(1f)) {
+                    ActionCell(Icons.Default.Cast, "Cast to TV", if (TvLink.paired()) primary else MaterialTheme.colorScheme.onSurface, Modifier.weight(1f)) {
                         vm.castItem(item)
                     }
                     if (item.kind == "vod" || item.kind == "ep") {
@@ -268,7 +268,7 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
                                 d.failed -> "Retry"
                                 else -> "${d.percent}%"
                             },
-                            if (d?.ready == true) Color(0xFF10B981) else Color.White, Modifier.weight(1f)
+                            if (d?.ready == true) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurface, Modifier.weight(1f)
                         ) { vm.download(item) }
                     }
                 }
@@ -280,16 +280,16 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
         if (plot.isNotBlank()) item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
                 Text(
-                    plot, fontSize = 14.sp, lineHeight = 21.sp, color = Color(0xFFC9CCD6),
+                    plot, fontSize = 14.sp, lineHeight = 21.sp, color = MaterialTheme.colorScheme.onSurface,
                     maxLines = if (moreText) 50 else 4, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable { moreText = !moreText }
                 )
                 if (!meta?.cast.isNullOrBlank()) Text(
-                    "Cast: " + meta!!.cast, fontSize = 12.sp, color = Color(0xFF8E92A0), maxLines = if (moreText) 6 else 2,
+                    "Cast: " + meta!!.cast, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (moreText) 6 else 2,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp)
                 )
                 if (!meta?.director.isNullOrBlank()) Text(
-                    "Director: " + meta!!.director, fontSize = 12.sp, color = Color(0xFF8E92A0), maxLines = 1,
+                    "Director: " + meta!!.director, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)
                 )
             }
@@ -300,12 +300,12 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
             if (vm.episodesLoading) item {
                 Box(Modifier.fillMaxWidth().padding(30.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             } else if (vm.episodes.isEmpty()) item {
-                Text("No episodes found", Modifier.padding(24.dp), color = Color.Gray)
+                Text("No episodes found", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 item {
                     Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Episodes", fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        Text("${vm.episodes.size} total", fontSize = 12.sp, color = Color.Gray)
+                        Text("${vm.episodes.size} total", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 if (seasons.size > 1) item {
@@ -314,7 +314,7 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
                             val on = sn == sel
                             Text(
                                 "Season $sn", fontSize = 13.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (on) Color.White else Color(0xFFC9CCD6),
+                                color = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.clip(RoundedCornerShape(20.dp))
                                     .background(if (on) primary else MaterialTheme.colorScheme.surfaceVariant)
                                     .clickable { sel = sn }.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -342,9 +342,9 @@ private fun DetailContent(vm: AppVM, item: Item, topPad: Dp, playing: Boolean) {
                         .clickable { vm.zapTo(c) }.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF1C1C26)), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
                         if (c.logo.startsWith("http")) AsyncImage(model = c.logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(5.dp))
-                        else Text(c.name.take(2).uppercase(), color = Color.Gray, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        else Text(c.name.take(2).uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.width(12.dp))
                     Text(c.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (cur) FontWeight.SemiBold else FontWeight.Normal)
@@ -366,7 +366,7 @@ private fun MetaLine(item: Item, meta: Meta?, center: Boolean = false) {
     if (item.kind == "live") parts.add("Live")
     if (parts.isEmpty()) return
     Text(
-        parts.joinToString("  ·  "), fontSize = 13.sp, color = Color(0xFFB8BBC6), maxLines = 1, overflow = TextOverflow.Ellipsis,
+        parts.joinToString("  ·  "), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
         textAlign = if (center) TextAlign.Center else TextAlign.Start, modifier = Modifier.padding(top = 4.dp)
     )
 }
@@ -386,7 +386,7 @@ private fun EpisodeRow(vm: AppVM, serie: Item, e: Item, current: Boolean) {
             .clickable { vm.playEpisode(serie, e) }.padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.width(120.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(11.dp)).background(Color(0xFF1C1C26))) {
+        Box(Modifier.width(120.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(11.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
             if (e.logo.startsWith("http")) AsyncImage(model = e.logo, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             Box(Modifier.fillMaxSize().background(Color(0x40000000)), contentAlignment = Alignment.Center) {
                 Icon(if (current) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
@@ -401,7 +401,7 @@ private fun EpisodeRow(vm: AppVM, serie: Item, e: Item, current: Boolean) {
             )
             Text(e.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
             val sub = e.info.ifBlank { e.plot }
-            if (sub.isNotBlank()) Text(sub, fontSize = 12.sp, color = Color(0xFF8E92A0), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            if (sub.isNotBlank()) Text(sub, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
         }
         IconButton(onClick = {
             val ready = offlineFile
@@ -415,9 +415,9 @@ private fun EpisodeRow(vm: AppVM, serie: Item, e: Item, current: Boolean) {
             when {
                 dl?.ready == true -> Icon(Icons.Default.PlayArrow, "Play offline", tint = Color(0xFF10B981))
                 dl?.failed == true -> Icon(Icons.Default.Refresh, "Retry download", tint = Color(0xFFE5484D))
-                dl?.paused == true -> Icon(Icons.Default.PlayArrow, "Resume download", tint = Color(0xFFB8BBC6))
-                dl != null -> Text("${dl.percent}%", fontSize = 11.sp, color = Color.Gray)
-                else -> Icon(Icons.Default.Download, "Download", tint = Color(0xFFB8BBC6))
+                dl?.paused == true -> Icon(Icons.Default.PlayArrow, "Resume download", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                dl != null -> Text("${dl.percent}%", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else -> Icon(Icons.Default.Download, "Download", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

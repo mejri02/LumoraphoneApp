@@ -72,7 +72,11 @@ fun PlayerPane(
     val errorMsg = vm.playerError
     var show by remember { mutableStateOf(true) }
     var tick by remember { mutableIntStateOf(0) }
-    var resize by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+    val resize = when (vm.aspectMode) {
+        "zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+    }
     var pos by remember(req.url) { mutableLongStateOf(0L) }
     var dur by remember(req.url) { mutableLongStateOf(0L) }
     var drag by remember { mutableStateOf<Float?>(null) }
@@ -278,11 +282,8 @@ fun PlayerPane(
                         )
                     }
                     CtrlBtn(Icons.Default.AspectRatio, "Aspect", 40) {
-                        resize = when (resize) {
-                            AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-                            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        }
+                        vm.cycleAspect()
+                        hint = vm.aspectLabel()
                         tick++
                     }
                     CtrlBtn(if (full) Icons.Default.FullscreenExit else Icons.Default.Fullscreen, "Fullscreen", 40) { onToggleFull() }
