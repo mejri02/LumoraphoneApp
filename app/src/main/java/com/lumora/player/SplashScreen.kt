@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -82,7 +83,7 @@ fun SplashScreen(onDone: () -> Unit) {
                 .graphicsLayer(scaleX = pulse, scaleY = pulse, alpha = 0.55f)
                 .background(
                     Brush.radialGradient(
-                        listOf(Color(0x55FF2E88), Color(0x338B5CF6), Color.Transparent)
+                        listOf(Color(0x558B5CF6), Color(0x334F7CFF), Color.Transparent)
                     ),
                     CircleShape
                 )
@@ -102,17 +103,31 @@ fun SplashScreen(onDone: () -> Unit) {
                     .clip(RoundedCornerShape(28.dp))
                     .background(
                         Brush.linearGradient(
-                            listOf(Color(0xFFFF2E88), Color(0xFF8B5CF6), Color(0xFF22D3EE))
+                            listOf(Color(0xFF8B5CF6), Color(0xFF4F7CFF), Color(0xFF22D3EE))
                         )
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    "L",
-                    color = Color.White,
-                    fontSize = 46.sp,
-                    fontWeight = FontWeight.Black
-                )
+                // Play mark inside an orbit — the same idea as the Lumore launcher icon.
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val h = size.height
+                    rotate(degrees = -22f) {
+                        drawOval(
+                            color = Color.White.copy(alpha = 0.55f),
+                            topLeft = androidx.compose.ui.geometry.Offset(w * 0.19f, h * 0.30f),
+                            size = androidx.compose.ui.geometry.Size(w * 0.62f, h * 0.40f),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.2.dp.toPx())
+                        )
+                    }
+                    val play = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(w * 0.43f, h * 0.33f)
+                        lineTo(w * 0.71f, h * 0.50f)
+                        lineTo(w * 0.43f, h * 0.67f)
+                        close()
+                    }
+                    drawPath(play, Color.White)
+                }
             }
 
             Spacer(Modifier.height(28.dp))
@@ -122,7 +137,7 @@ fun SplashScreen(onDone: () -> Unit) {
                 "LUMORE",
                 style = TextStyle(
                     brush = Brush.horizontalGradient(
-                        listOf(Color.White, Color(0xFFFFD6EA), Color.White)
+                        listOf(Color.White, Color(0xFFDCE7FF), Color.White)
                     ),
                     fontSize = 42.sp,
                     fontWeight = FontWeight.Black,
@@ -142,7 +157,7 @@ fun SplashScreen(onDone: () -> Unit) {
                     .graphicsLayer(alpha = credit.value)
                     .background(
                         Brush.horizontalGradient(
-                            listOf(Color.Transparent, Color(0xFFFF2E88), Color(0xFF8B5CF6), Color.Transparent)
+                            listOf(Color.Transparent, Color(0xFF8B5CF6), Color(0xFF22D3EE), Color.Transparent)
                         )
                     )
             )
@@ -185,7 +200,7 @@ fun SplashScreen(onDone: () -> Unit) {
                         Modifier
                             .size(5.dp)
                             .graphicsLayer(alpha = 0.25f + 0.55f * ((i + 1) / 3f) * credit.value)
-                            .background(Color(0xFFFF2E88), CircleShape)
+                            .background(Color(0xFF8B5CF6), CircleShape)
                     )
                 }
             }
